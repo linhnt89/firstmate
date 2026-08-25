@@ -403,6 +403,18 @@
     {
       "path": "skills/stow/SKILL.md",
       "audience": "public-product"
+    },
+    {
+      "path": ".github/firstmate/HANDOFF_PROTOCOL.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/fm-handoff.md",
+      "audience": "operator-current"
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "audience": "operator-current"
     }
   ]
 }
