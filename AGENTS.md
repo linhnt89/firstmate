@@ -580,3 +580,18 @@ Keep this file for knowledge useful to almost every future agent session in this
 Do not repeat what the codebase already shows; point to the authoritative file, skill, command, or doc.
 Prefer rewriting or pruning existing entries over appending new ones.
 When updating this file, preserve every safety boundary and keep the always-loaded contract concise.
+
+<!-- firstmate-github-handoff:start v1 -->
+## Firstmate / external handoff
+
+For GitHub Issues, pull requests, or discussions used to hand work between
+Firstmate and an external specialist, follow:
+
+`.github/firstmate/HANDOFF_PROTOCOL.md`
+
+Use the corresponding repository Issue or PR template rather than inventing a
+competing handoff format.
+
+One source Issue may contain multiple specialist request/response rounds as
+defined by the protocol.
+<!-- firstmate-github-handoff:end -->
