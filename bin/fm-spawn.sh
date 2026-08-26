@@ -1085,15 +1085,6 @@ else
 fi
 [ -z "$HARNESS_ARG" ] || ARG3=$HARNESS_ARG
 
-# A ship with a remote delivery mode will eventually push or create/merge a
-# provider review request. Check that exact project's provider, configured
-# capability, CLI, and authentication before creating any worker endpoint or
-# task metadata. A read-only source remains usable for clone/fetch/sync, while
-# an attempted writable delivery is refused rather than silently downgraded.
-if [ "$KIND" = ship ] && [ "$MODE" != local-only ]; then
-  fm_forge_require_write_project "$PROJ" "$MODE" || exit 1
-fi
-
 shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
@@ -1667,6 +1658,16 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
+
+# A ship with a remote delivery mode will eventually push or create/merge a
+# provider review request. Check that exact project's provider, configured
+# capability, CLI, and authentication before creating any worker endpoint or
+# task metadata. A read-only source remains usable for clone/fetch/sync, while
+# an attempted writable delivery is refused rather than silently downgraded.
+if [ "$KIND" = ship ] && [ "$MODE" != local-only ]; then
+  fm_forge_require_write_project "$PROJ_ABS" "$MODE" || exit 1
+fi
+
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
 delivery_rigor_rank() {  # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task mode
