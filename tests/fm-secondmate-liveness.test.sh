@@ -166,7 +166,7 @@ test_herdr_agent_state_preserves_husk_classifier() {
   for row in 'dead missing' 'no-agent dead' 'live alive' 'unknown unreadable'; do
     pane_state=${row%% *}
     expected=${row#* }
-    out=$(FM_TEST_PANE_STATE="$pane_state" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_pane_agent_state() { printf "%s" "$FM_TEST_PANE_STATE"; }; fm_backend_herdr_pane_idle_shell_proof() { case "$FM_TEST_PANE_STATE" in live) printf active ;; no-agent) printf idle-shell ;; *) printf unknown ;; esac; }; fm_backend_herdr_agent_state "sess:p1"' "$ROOT")
+    out=$(FM_TEST_PANE_STATE="$pane_state" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_pane_agent_state() { printf "%s" "$FM_TEST_PANE_STATE"; }; fm_backend_herdr_pane_idle_shell_proof() { case "$FM_TEST_PANE_STATE" in live) printf agent ;; no-agent) printf idle-shell ;; *) printf unknown ;; esac; }; fm_backend_herdr_agent_state "sess:p1"' "$ROOT")
     [ "$out" = "$expected" ] || fail "Herdr pane state $pane_state should map to $expected, got '$out'"
   done
 
@@ -177,6 +177,18 @@ test_herdr_agent_state_preserves_husk_classifier() {
   [ "$out" = dead ] || fail "the Herdr compatibility view should keep a no-agent husk dead, got '$out'"
 
   pass "fm_backend_herdr_agent_state: preserves missing/no-agent/live/unknown husk behavior"
+}
+
+test_herdr_positive_process_attribution_covers_supported_harnesses() {
+  bash -c '
+    . "$0/bin/backends/herdr.sh"
+    for name in claude codex opencode grok kimi pi pi-signed pi-launcher muse muse-bin-2026; do
+      fm_backend_herdr_process_is_agent "$name" "$name" "" || exit 1
+    done
+    fm_backend_herdr_process_is_agent node "/home/crew/.local/share/cursor-agent/versions/v/agent" ""
+    fm_backend_herdr_process_is_agent node "/home/crew/.local/bin/muse-bin-2026" ""
+  ' "$ROOT" || fail "a supported Herdr harness process identity must remain positively attributable"
+  pass "Herdr liveness: supported harness and Cursor process identities are positively attributed"
 }
 
 # Herdr process-proof fixture helpers. The adapter is exercised through its
@@ -254,8 +266,16 @@ test_herdr_agent_state_reconciles_registration_with_repeated_process_proof() {
   printf '4242 1\n5252 4242\n' > "$dir/ps.rows"
   herdr_process_info "$dir/info/1.json" 4242 4242 '{"pid":4242,"name":"zsh","argv0":"zsh"}'
   out=$(run_herdr_process_state "$dir")
-  [ "$out" = alive ] || fail "a registered pane whose shell owns a child process must remain non-recoverable/alive, got '$out'"
-  pass "Herdr liveness: child ownership prevents stale-shell recovery"
+  [ "$out" = unreadable ] || fail "a registered pane whose shell owns a child process must refuse lifecycle recovery, got '$out'"
+  pass "Herdr liveness: shell-owned child activity stays unreadable"
+
+  dir="$TMP_ROOT/herdr-process-helper"; mkdir -p "$dir/info"; : > "$dir/info.count"
+  make_herdr_process_ps "$dir"
+  printf '4242 1\n' > "$dir/ps.rows"
+  herdr_process_info "$dir/info/1.json" 4242 4242 '{"pid":4242,"name":"helper","argv0":"helper"}'
+  out=$(run_herdr_process_state "$dir")
+  [ "$out" = unreadable ] || fail "an unrecognized foreground helper must refuse lifecycle recovery, got '$out'"
+  pass "Herdr liveness: unrecognized foreground activity stays unreadable"
 
   dir="$TMP_ROOT/herdr-process-changing"; mkdir -p "$dir/info"; : > "$dir/info.count"
   make_herdr_process_ps "$dir"
@@ -295,7 +315,7 @@ test_agent_state_dispatcher_and_compatibility() {
   out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
   [ "$out" = alive ] || fail "detailed dispatcher should route tmux, got '$out'"
 
-  out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source herdr; fm_backend_herdr_pane_agent_state() { printf "live"; }; fm_backend_herdr_pane_idle_shell_proof() { printf active; }; fm_backend_agent_state herdr sess:p1' "$ROOT")
+  out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source herdr; fm_backend_herdr_pane_agent_state() { printf "live"; }; fm_backend_herdr_pane_idle_shell_proof() { printf agent; }; fm_backend_agent_state herdr sess:p1' "$ROOT")
   [ "$out" = alive ] || fail "detailed dispatcher should route Herdr, got '$out'"
 
   out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state zellij sess:7' "$ROOT")
@@ -651,6 +671,7 @@ test_sweep_noop_with_no_secondmate_meta() {
 test_tmux_agent_state_classifies
 test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
+test_herdr_positive_process_attribution_covers_supported_harnesses
 test_herdr_agent_state_reconciles_registration_with_repeated_process_proof
 test_agent_state_dispatcher_and_compatibility
 test_sweep_respawns_confirmed_dead_secondmate

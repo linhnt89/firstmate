@@ -11,7 +11,8 @@
 #
 # No real agent is launched. herdr's `pane report-agent` is the same registry
 # the adapter reads, so registering and not registering an agent on a plain
-# shell pane exercises exactly the classification the control plane gates on.
+# shell pane exercises the stale-registration boundary; a real shell-owned
+# helper additionally proves lifecycle control refuses unattributed activity.
 #
 # Always runs on a private, named, throwaway lab session, never the default
 # one (tests/herdr-test-safety.sh; the 2026-07-02 incident). Skips cleanly
@@ -142,5 +143,35 @@ herdr pane get "$PANE_ID" --session "$SESSION" >/dev/null 2>&1 \
   || fail "the control plane must never remove the endpoint it was operating on"
 [ -d "$WT" ] || fail "the control plane must never remove the task's local copy"
 pass "real herdr: stale-shell lifecycle recovery preserves the exact endpoint and local copy"
+
+# A registered pane whose shell owns a background helper is not a positively
+# attributed agent. Lifecycle control must refuse before sending interrupt or
+# exit input, and the exact pane must remain available for later reconciliation.
+fm_backend_herdr_send_literal "$SESSION:$PANE_ID" 'sleep 30 &' \
+  || fail "could not stage a shell-owned helper"
+fm_backend_herdr_send_key "$SESSION:$PANE_ID" Enter \
+  || fail "could not submit the shell-owned helper"
+sleep 0.3
+STATE=$(fm_backend_agent_state herdr "$SESSION:$PANE_ID")
+[ "$STATE" = unreadable ] || fail "shell-owned helper activity must be unreadable, got '$STATE'"
+pass "real herdr: shell-owned helper activity is not promoted to a live agent"
+
+if OUT=$(run_control hsmoke interrupt 2>&1); then
+  fail "interrupt should refuse for unattributed helper activity: $OUT"
+fi
+case "$OUT" in
+  *"rather than a positively classified state"*) : ;;
+  *) fail "the interrupt refusal should identify unattributed activity, got: $OUT" ;;
+esac
+if OUT=$(run_control hsmoke exit 2>&1); then
+  fail "exit should refuse for unattributed helper activity: $OUT"
+fi
+case "$OUT" in
+  *"rather than a positively classified state"*) : ;;
+  *) fail "the exit refusal should identify unattributed activity, got: $OUT" ;;
+esac
+herdr pane get "$PANE_ID" --session "$SESSION" >/dev/null 2>&1 \
+  || fail "lifecycle refusal must preserve the exact endpoint"
+pass "real herdr: lifecycle control sends no input to an ambiguous shell-owned helper"
 
 fm_backend_herdr_kill "$SESSION:$PANE_ID" 2>/dev/null || true

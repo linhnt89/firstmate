@@ -77,6 +77,10 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # every backend so the decision cannot drift.
 # shellcheck source=bin/fm-composer-lib.sh
 . "$FM_BACKEND_HERDR_ROOT/bin/fm-composer-lib.sh"
+# Cursor's process identity is structural rather than a command-name match.
+# Reuse its single classifier for Herdr's positive agent-process proof.
+# shellcheck source=bin/fm-cursor-lib.sh
+. "$FM_BACKEND_HERDR_ROOT/bin/fm-cursor-lib.sh"
 
 # Shared, backend-neutral normalized-transition shape and the single-owner
 # status->action policy table (bin/fm-transition-lib.sh). This adapter's event
@@ -1175,18 +1179,53 @@ fm_backend_herdr_pid_is_bare_shell() {  # <ps-bin> <pid>
   return 1
 }
 
+# fm_backend_herdr_process_is_agent: return success only for a process whose
+# executable identity belongs to one of the verified worker harnesses. A
+# registered Herdr pane is not enough by itself: a stale registration can sit
+# above a shell, helper, or unrelated foreground process. Exact path components
+# cover versioned installs; the basename rules cover stable launchers, and
+# Cursor's structural matcher handles its bundled node process.
+fm_backend_herdr_process_is_agent() {  # <name> <argv0> <argv-text>
+  local name=$1 argv0=$2 argv=${3:-} value harness base value_base
+  base=${name##*/}
+  base=${base#-}
+  case "$base" in
+    claude|codex|opencode|grok|kimi|pi|pi-signed|pi-launcher|Pi|muse|muse-bin-*)
+      return 0
+      ;;
+  esac
+  for value in "$name" "$argv0" "$argv"; do
+    value_base=${value##*/}
+    value_base=${value_base#-}
+    case "$value_base" in
+      muse|muse-bin-*|pi-launcher) return 0 ;;
+    esac
+    for harness in claude codex opencode grok kimi pi pi-signed pi-launcher; do
+      case "/$value/" in
+        */"$harness"/*) return 0 ;;
+      esac
+    done
+    case "/$value/" in
+      */muse/*) return 0 ;;
+    esac
+  done
+  fm_cursor_process_matches "$name" "$argv" "$argv0"
+}
+
 # fm_backend_herdr_pane_process_observation: one strict observation of the
 # exact pane's process owner. It prints one of:
 #   idle-shell<TAB><pid> - the pane is a lone recognized idle shell with no child;
-#   active               - a valid process observation proves something else owns it;
+#   agent                - one foreground process is positively attributed to a
+#                          verified worker harness;
+#   ambiguous            - activity exists, but ownership is not attributable;
 #   unknown              - pane identity, process information, or the process
 #                          table is unreadable or contradictory.
-# A valid non-shell foreground process is deliberately only an `active` safety
-# result here. The Herdr registration is the identity evidence that lets the
-# caller call it a live agent; an unknown process is never treated as dead.
+# Shell-owned children, helper processes, and multi-process foreground groups
+# are deliberately `ambiguous`, never generic live-agent evidence. An unknown
+# process is never treated as dead.
 fm_backend_herdr_pane_process_observation() {  # <session> <pane-id>
   local session=$1 pane=$2 info shell_pid foreground_pgid count process_pid
-  local name argv0 shell_name rows stat ps_bin table_state
+  local name argv0 process_args shell_name rows stat ps_bin table_state
   info=$(fm_backend_herdr_cli "$session" pane process-info --pane "$pane" 2>/dev/null) || {
     printf 'unknown'
     return 0
@@ -1217,17 +1256,13 @@ fm_backend_herdr_pane_process_observation() {  # <session> <pane-id>
     printf 'unknown'
     return 0
   }
-  if [ "$foreground_pgid" != "$shell_pid" ] || [ "$count" -ne 1 ]; then
-    printf 'active'
+  [ "$count" -eq 1 ] || {
+    printf 'ambiguous'
     return 0
-  fi
+  }
   process_pid=$(printf '%s' "$info" | jq -er \
     '.result.process_info.foreground_processes[0].pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || {
     printf 'unknown'
-    return 0
-  }
-  [ "$process_pid" = "$shell_pid" ] || {
-    printf 'active'
     return 0
   }
   name=$(printf '%s' "$info" | jq -er \
@@ -1243,16 +1278,32 @@ fm_backend_herdr_pane_process_observation() {  # <session> <pane-id>
     printf 'unknown'
     return 0
   }
+  process_args=$(printf '%s' "$info" | jq -r '
+    .result.process_info.foreground_processes[0].argv
+    | if type == "array" then map(select(type == "string")) | join(" ") else "" end
+  ' 2>/dev/null) || process_args=
+  if fm_backend_herdr_process_is_agent "$name" "$argv0" "$process_args"; then
+    printf 'agent'
+    return 0
+  fi
+  [ "$process_pid" = "$shell_pid" ] || {
+    printf 'ambiguous'
+    return 0
+  }
+  [ "$foreground_pgid" = "$shell_pid" ] || {
+    printf 'ambiguous'
+    return 0
+  }
   shell_name=${name##*/}
   argv0=${argv0#-}
   argv0=${argv0##*/}
   if [ "$argv0" != "$shell_name" ]; then
-    printf 'active'
+    printf 'ambiguous'
     return 0
   fi
   case "$shell_name" in
     sh|bash|zsh|dash|ksh|fish) ;;
-    *) printf 'active'; return 0 ;;
+    *) printf 'ambiguous'; return 0 ;;
   esac
 
   ps_bin=${FM_HERDR_PS_BIN:-ps}
@@ -1271,13 +1322,13 @@ fm_backend_herdr_pane_process_observation() {  # <session> <pane-id>
     $2 == shell { child++ }
     END {
       if (bad || found != 1) print "unknown"
-      else if (child != 0) print "active"
+      else if (child != 0) print "ambiguous"
       else print "idle-shell"
     }
   ')
   [ -n "$table_state" ] || table_state=unknown
   case "$table_state" in
-    active|unknown)
+    ambiguous|unknown)
       printf '%s' "$table_state"
       return 0
       ;;
@@ -1288,17 +1339,17 @@ fm_backend_herdr_pane_process_observation() {  # <session> <pane-id>
   }
   case "$stat" in
     S*|I*) printf 'idle-shell\t%s' "$shell_pid" ;;
-    *) printf 'active' ;;
+    *) printf 'ambiguous' ;;
   esac
 }
 
 # fm_backend_herdr_pane_idle_shell_proof: require repeated, consecutive strict
-# samples of the same exact pane and shell pid. An active process seen before a
-# clean proof, a changed pid, or a failed read after a clean sample makes the
-# result unknown rather than allowing a later clean sample to erase changing
-# evidence. A leading unreadable sample may be retried for the short-lived
-# process-info race already observed during Herdr relayout; it never licenses a
-# dead result by itself.
+# samples of the same exact pane and shell pid. Agent or ambiguous activity
+# seen before a clean proof, a changed pid, or a failed read after a clean sample
+# makes the result unknown rather than allowing a later clean sample to erase
+# changing evidence. A leading unreadable sample may be retried for the
+# short-lived process-info race already observed during Herdr relayout; it never
+# licenses a dead result by itself.
 fm_backend_herdr_pane_idle_shell_proof() {  # <session> <pane-id>
   local session=$1 pane=$2 attempt=0 max_attempts=${FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS:-10}
   local required=${FM_BACKEND_HERDR_IDLE_SHELL_PROOF_SAMPLES:-2}
@@ -1327,8 +1378,8 @@ fm_backend_herdr_pane_idle_shell_proof() {  # <session> <pane-id>
           return 0
         fi
         ;;
-      active)
-        if [ "$samples" -gt 0 ]; then printf 'unknown'; else printf 'active'; fi
+      agent|ambiguous)
+        if [ "$samples" -gt 0 ]; then printf 'unknown'; else printf '%s' "$verdict"; fi
         return 0
         ;;
       *)
@@ -2036,12 +2087,13 @@ fm_backend_herdr_tab_is_husk() {  # <session> <pane_id>
 # fm_backend_herdr_agent_state: recovery-grade state for the same session-start
 # sweep as the tmux classifier. A structurally gone pane is `missing`. A
 # no-agent response is `dead` only after the exact pane is repeatedly proven to
-# be the same lone idle shell; an active, changing, unreadable, or contradictory
-# process result refuses. Herdr registration is not enough to report `alive`: a
-# registered pane whose exact process identity is repeatedly proven to be the
-# same lone idle shell is a stale registration and is also `dead`, while an
-# active process is `alive` and changing, unreadable, or contradictory process
-# evidence is `unreadable`.
+# be the same lone idle shell; an unattributed, changing, unreadable, or
+# contradictory process result refuses. Herdr registration is not enough to
+# report `alive`: a registered pane whose exact process identity is repeatedly
+# proven to be the same lone idle shell is a stale registration and is also
+# `dead`. Only a registered pane with one positively attributed foreground
+# harness process is `alive`; shell-owned children, helpers, and other ambiguous
+# activity are `unreadable`.
 fm_backend_herdr_agent_state() {  # <target>
   local target=$1 pane_state process_proof
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
@@ -2054,9 +2106,7 @@ fm_backend_herdr_agent_state() {  # <target>
         "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")
       case "${process_proof%%$'\t'*}" in
         idle-shell) printf 'dead' ;;
-        active)
-          [ "$pane_state" = live ] && printf 'alive' || printf 'unreadable'
-          ;;
+        agent) [ "$pane_state" = live ] && printf 'alive' || printf 'unreadable' ;;
         *) printf 'unreadable' ;;
       esac
       ;;

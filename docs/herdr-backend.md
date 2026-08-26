@@ -267,9 +267,10 @@ This prevents closing the workspace's last tab before a replacement exists.
 
 The generic Herdr agent-liveness probe reconciles the registered-agent result with the exact pane's process owner.
 A structurally gone pane becomes `missing`, and either a no-agent pane or a registered pane becomes `dead` only when repeated process-info samples prove the same lone recognized idle shell with no child ownership.
-A registered pane with a valid foreground agent or child process remains `alive`.
-A changing, contradictory, or unreadable process observation becomes `unreadable`, so stale registration never overrides process evidence and never licenses a duplicate relaunch.
-Unlike tmux process-name inspection, native registration still supplies the positive identity for a live Herdr agent while the process proof owns the negative recovery decision.
+A registered pane is `alive` only when one foreground process is positively attributed to a verified worker harness.
+A shell-owned child, helper, multi-process foreground group, or other unattributed activity is `unreadable`, not live-agent evidence, so lifecycle control cannot send agent-specific input into it.
+A changing, contradictory, or unreadable process observation also becomes `unreadable`, so stale registration never overrides process evidence and never licenses a duplicate relaunch.
+Native registration supplies the required pane identity, while exact process attribution supplies the positive live-agent proof and the repeated process proof owns the negative recovery decision.
 `bin/fm-control.sh` treats the proven stale shell as `already-stopped`, and `bin/fm-spawn.sh --relaunch` adopts the exact recorded pane and worktree rather than closing the pane first.
 The final relaunch boundary repeats the same liveness check after worktree reconciliation and refuses if the endpoint changes.
 The session-start sweep and no-run `fm-crew-state.sh` fallback use this same probe.
@@ -287,6 +288,7 @@ Polling runs every cycle and remains the permanent fallback when protocol 16, th
 There is still one watcher process; the event reader is a bounded child of that watcher.
 
 `tests/fm-backend-herdr-eventwait-smoke.test.sh`, `tests/fm-transition-lib.test.sh`, and `tests/fm-supervision-events.test.sh` cover capability, subscribe-then-reconcile ordering, dedupe, exemptions, and polling fallback.
+`tests/fm-secondmate-liveness.test.sh` covers positive harness attribution separately from shell-owned child/helper refusal, including repeated samples and changing evidence.
 
 ## Away-mode supervisor support
 

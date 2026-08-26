@@ -105,6 +105,10 @@ case "${1:-}" in
             : > "$FM_FAKE_CWD_RACE_READY"
             /bin/sleep 1
           fi
+          if [ -n "${FM_FAKE_RELAUNCH_RACE:-}" ] && [ ! -e "$D/relaunch-race-fired" ]; then
+            : > "$D/relaunch-race-fired"
+            printf '%s' "$FM_FAKE_RELAUNCH_RACE" > "$D/command"
+          fi
           cat "$D/cwd"; printf '\n'; exit 0 ;;
       esac
     done
@@ -178,6 +182,7 @@ run_spawn() {  # <case-dir> <args...>
   local dir=$1; shift
   env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
+    FM_FAKE_RELAUNCH_RACE="${FM_FAKE_RELAUNCH_RACE:-}" \
     "$SPAWN" "$@" 2>&1
 }
 
@@ -1262,6 +1267,25 @@ test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution() {
 
 # --- 6. fm-spawn --relaunch's own refusals -----------------------------------
 
+test_spawn_relaunch_refuses_endpoint_state_race() {
+  local state dir out rc before id
+  for state in claude mystery; do
+    id="rl-race-${state}"
+    dir=$(new_case "race-$state" "$id")
+    add_ship_task "$dir" "$id" claude
+    printf 'zsh' > "$dir/fake/command"
+    before=$(cat "$dir/home/state/$id.meta")
+    out=$(FM_FAKE_RELAUNCH_RACE="$state" run_spawn "$dir" "$id" --relaunch --harness claude); rc=$?
+    expect_code 1 "$rc" "a relaunch endpoint race to $state should refuse"
+    assert_contains "$out" "before relaunch" "the race refusal should name the launch-boundary check"
+    assert_contains "$out" "$state" "the race refusal should report the new endpoint state"
+    [ -z "$(cat "$dir/fake/literal")" ] || fail "a relaunch race to $state must send no replacement launch"
+    [ "$(cat "$dir/home/state/$id.meta")" = "$before" ] \
+      || fail "a relaunch race to $state must not republish replacement metadata"
+  done
+  pass "fm-spawn --relaunch: a dead-to-alive or ambiguous endpoint race refuses before launch publication"
+}
+
 test_spawn_relaunch_refuses_a_live_agent() {
   local dir out rc
   dir=$(new_case live rl15)
@@ -1354,6 +1378,7 @@ test_secondmate_checkpoint_refuses_unreadable_child_state
 test_concurrent_relaunch_is_refused
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock
 test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution
+test_spawn_relaunch_refuses_endpoint_state_race
 test_spawn_relaunch_refuses_a_live_agent
 test_spawn_relaunch_refuses_contradicting_flags
 test_spawn_relaunch_refuses_an_unrecorded_task
