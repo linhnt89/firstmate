@@ -209,6 +209,8 @@ test_ship_modes_generate_clean_briefs() {
     assert_grep "# Definition of done" "$brief" "$id: brief missing Definition of done section"
     grep -qx "Delivery contract: mode=$mode" "$brief" \
       || fail "$id: brief did not record its machine-readable delivery contract line"
+    grep -qx "Alignment contract: bypassed" "$brief" \
+      || fail "$id: brief did not record the clear-mechanical alignment default"
     assert_grep "{TASK}" "$brief" "$id: brief missing the {TASK} placeholder"
     assert_grep "mid-task \`working:\` line (including setup complete) is nonterminal" "$brief" \
       "$id: brief missing nonterminal working:/setup-complete gate protection"
@@ -556,6 +558,18 @@ test_secondmate_marked_request_reporting_contract() {
     "secondmate charter lost declared external waits"
   assert_grep 'a captain decision, a real blocker, a failure, or work ready for review' "$brief" \
     "secondmate charter lost decisions, blockers, failures, or ready outcomes"
+  assert_grep 'pre-implementation alignment' "$brief" \
+    "secondmate charter did not expose the focused alignment path"
+  assert_grep 'data/<alignment-id>/report.md' "$brief" \
+    "secondmate charter did not route alignment outcomes to its local report"
+  assert_no_grep "$home/data/marked-request-reporting/report.md" "$brief" \
+    "secondmate charter leaked the primary home into its local alignment report path"
+  assert_grep 'fm-alignment.sh validate-report' "$brief" \
+    "secondmate charter did not require alignment report validation"
+  assert_grep '--complete' "$brief" \
+    "secondmate charter did not require complete alignment report validation"
+  assert_grep 'do not relay that detailed conversation' "$brief" \
+    "secondmate charter did not preserve direct-captain alignment privacy"
   assert_grep 'States: working, needs-decision, blocked, paused, done, failed.' "$brief" \
     "secondmate charter changed the preserved status vocabulary"
   pass "fm-brief.sh: marked requests avoid generic acknowledgements and preserve material reporting"

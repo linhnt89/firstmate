@@ -40,6 +40,9 @@
 # "Delivery contract: mode=<mode>" line. bin/fm-spawn.sh reads that line and refuses
 # to launch a ship task whose explicit --mode disagrees, so an adjusted brief and the
 # recorded task metadata cannot drift apart.
+# Ship briefs also carry one "Alignment contract: bypassed|required|complete" line.
+# The standard scaffold uses "bypassed" for clear mechanical work; firstmate changes
+# it to "required" or "complete" during intake without changing the delivery mode.
 # Ship briefs begin with a worktree-isolation assertion before the branch step.
 # --mode is refused on scout and secondmate scaffolds: a scout's deliverable is a
 # report rather than a merge, and a charter is not a delivery contract.
@@ -250,6 +253,15 @@ Before treating an investigation or visual review as complete, load \`captain-ho
 A message with NO marker is the captain typing directly into your pane: treat it as authoritative captain intervention and stay conversational exactly as you would for any captain message; do not force it onto the status path.
 A request arriving through the instruction inbox below follows the same marker and reply rules.
 
+# Pre-implementation alignment
+When the main firstmate routes a marked request for pre-implementation alignment, load \`alignment\` from this home's \`.agents/skills/alignment/SKILL.md\` before reasoning about it.
+The captain may converse directly with you for this focused alignment work; do not relay that detailed conversation through the main firstmate.
+Write the durable outcome, rather than a transcript, to \`data/<alignment-id>/report.md\` in this Secondmate home with goal, relevant facts, settled decisions, acceptance criteria, out of scope, engineering discretion, and remaining open decisions.
+Use a distinct alignment id for each request so simultaneous alignments never share a report.
+Use the existing \`captain-hold-lifecycle\` for genuine captain-owned decisions, and do not report implementation-ready completion while material open decisions remain.
+When the outcome is implementation-ready, validate the report with \`bin/fm-alignment.sh validate-report data/<alignment-id>/report.md --complete\` and notify the parent with \`bin/fm-secondmate-report.sh --doc <parent-status-file> done <corr-id> data/<alignment-id>/report.md ...\`, preserving the exact correlation token.
+Ordinary routed implementation work remains under the normal marked-request and status/document-pointer rules above.
+
 $INBOX_SECTION
 
 # Escalation to main firstmate
@@ -439,6 +451,12 @@ You are a crewmate: an autonomous worker agent managed by firstmate. Work on you
 {TASK}
 
 $HERDR_SECTION
+
+# Pre-implementation alignment
+Alignment contract: bypassed
+This default is for clear mechanical work; firstmate changes the line to \`required\` before alignment and \`complete\` after a durable local report or external handoff has settled every material product, behavioral, contract, data-semantic, and architectural decision.
+A complete contract must retain an \`Alignment source:\` line and an \`# Alignment outcome\` with Goal, Relevant facts, Settled decisions, Acceptance criteria, Out of scope, Engineering discretion, and Remaining open decisions sections.
+When the contract is complete, treat its settled decisions and acceptance criteria as authoritative; escalate any newly discovered material contradiction through the existing keyed decision path instead of silently choosing a new direction.
 
 # Setup
 You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.

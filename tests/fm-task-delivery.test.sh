@@ -20,6 +20,7 @@ set -u
 SPAWN="$ROOT/bin/fm-spawn.sh"
 PROMOTE="$ROOT/bin/fm-promote.sh"
 PROJECT_MODE="$ROOT/bin/fm-project-mode.sh"
+ALIGNMENT="$ROOT/bin/fm-alignment.sh"
 TMP_ROOT=$(fm_test_tmproot fm-task-delivery)
 
 # A home with one registered project, one project directory, and a fake tmux that
@@ -198,6 +199,109 @@ EOF
   pass "fm-spawn: a scout spawn resolves no delivery posture from the registry"
 }
 
+write_alignment_report() {
+  local path=$1 remaining=${2:-None - no material open decisions remain.}
+  cat > "$path" <<EOF
+# Pre-implementation alignment
+
+## Goal
+Deliver the agreed outcome.
+
+## Relevant facts
+The repository provides the existing mechanism.
+
+## Settled decisions
+Use the existing implementation path.
+
+## Acceptance criteria
+The behavior is covered by executable tests.
+
+## Out of scope
+Unrelated workflow changes.
+
+## Engineering discretion
+The worker chooses routine implementation details.
+
+## Remaining open decisions
+$remaining
+EOF
+}
+
+test_alignment_report_and_spawn_barrier() {
+  local rec home proj fakebin report brief out status
+  rec=$(make_home alignment)
+  IFS='|' read -r home proj fakebin <<EOF
+$rec
+EOF
+  report="$home/alignment-report.md"
+  write_alignment_report "$report" '- Choose between the existing and replacement contract.'
+  out=$($ALIGNMENT validate-report "$report")
+  [ "$out" = valid ] || fail "an in-progress alignment report should validate structurally"
+  out=$($ALIGNMENT validate-report "$report" --complete 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a report with an open material decision passed the complete check"
+  assert_contains "$out" "material open decisions" "incomplete alignment report did not name its remaining decisions"
+
+  brief="$home/data/alignment-required/brief.md"
+  mkdir -p "$(dirname "$brief")"
+  cat > "$brief" <<'EOF'
+# Definition of done
+Delivery contract: mode=no-mistakes
+Alignment contract: required
+EOF
+  out=$(run_spawn "$home" "$fakebin" alignment-required "$proj" claude --mode no-mistakes --yolo off 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a required alignment contract reached backend creation"
+  assert_contains "$out" "alignment barrier refused" "required alignment refusal did not identify the barrier"
+  assert_absent "$home/state/alignment-required.meta" "required alignment refusal published task metadata"
+
+  brief="$home/data/alignment-bypassed/brief.md"
+  mkdir -p "$(dirname "$brief")"
+  cat > "$brief" <<'EOF'
+# Definition of done
+Delivery contract: mode=no-mistakes
+Alignment contract: bypassed
+EOF
+  out=$(run_spawn "$home" "$fakebin" alignment-bypassed "$proj" claude --mode no-mistakes --yolo off 2>&1)
+  assert_not_contains "$out" "alignment barrier refused" "bypassed alignment contract was treated as blocked"
+
+  brief="$home/data/alignment-complete/brief.md"
+  mkdir -p "$(dirname "$brief")"
+  cat > "$brief" <<'EOF'
+# Definition of done
+Delivery contract: mode=no-mistakes
+Alignment contract: complete
+Alignment source: data/alignment-report.md
+
+# Alignment outcome
+
+## Goal
+Deliver the agreed outcome.
+
+## Relevant facts
+The repository provides the existing mechanism.
+
+## Settled decisions
+Use the existing implementation path.
+
+## Acceptance criteria
+The behavior is covered by executable tests.
+
+## Out of scope
+Unrelated workflow changes.
+
+## Engineering discretion
+The worker chooses routine implementation details.
+
+## Remaining open decisions
+None - no material open decisions remain.
+EOF
+  "$ALIGNMENT" check "$brief" || fail "a complete alignment brief with no open decisions was rejected"
+  out=$(run_spawn "$home" "$fakebin" alignment-complete "$proj" claude --mode no-mistakes --yolo off 2>&1)
+  assert_not_contains "$out" "alignment barrier refused" "complete alignment contract was treated as blocked"
+  pass "fm-alignment: reports distinguish open decisions and the spawn barrier preserves bypass and completion paths"
+}
+
 # Promotion is where a scout's ship contract is finally decided, so it requires the
 # same explicit values and writes them into the task's durable record.
 test_promote_requires_and_records_the_delivery_contract() {
@@ -238,6 +342,30 @@ test_promote_requires_and_records_the_delivery_contract() {
   pass "fm-promote: promotion requires the delivery contract and records it exactly once"
 }
 
+test_promote_refuses_material_alignment() {
+  local rec home proj fakebin meta out status brief
+  rec=$(make_home promote-alignment)
+  IFS='|' read -r home proj fakebin <<EOF
+$rec
+EOF
+  meta="$home/state/promote-alignment.meta"
+  printf 'window=fm-promote-alignment\nkind=scout\nworktree=/tmp/wt\n' > "$meta"
+  brief="$home/data/promote-alignment/brief.md"
+  mkdir -p "$(dirname "$brief")"
+  cat > "$brief" <<'EOF'
+# Definition of done
+Alignment contract: required
+EOF
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" promote-alignment \
+    --mode direct-PR --yolo off 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "scout promotion with required alignment should be refused"
+  assert_contains "$out" "alignment barrier refused promotion" \
+    "promotion refusal did not identify the alignment barrier"
+  assert_grep 'kind=scout' "$meta" "refused aligned promotion changed the scout kind"
+  pass "fm-promote: material alignment remains a barrier before scout implementation promotion"
+}
+
 # The registry parser survives for the mechanical consumers only. It accepts the
 # conditional policy, maps it to its most rigorous leg for them, and exposes the
 # raw annotation for the one caller that must tell a policy from a flat mode.
@@ -272,11 +400,13 @@ EOF
   pass "fm-project-mode: the conditional policy is accepted, mapped for mechanical callers, and readable raw"
 }
 
+test_alignment_report_and_spawn_barrier
 test_ship_spawn_requires_a_valid_delivery_contract
 test_scout_and_secondmate_refuse_delivery_flags
 test_spawn_refuses_a_brief_mode_mismatch
 test_spawn_notices_a_rigor_downgrade_against_the_registry
 test_scout_records_no_delivery_posture
 test_promote_requires_and_records_the_delivery_contract
+test_promote_refuses_material_alignment
 test_project_mode_maps_the_conditional_policy
 echo "# all fm-task-delivery tests passed"

@@ -130,6 +130,9 @@
 #   --scout records kind=scout in the task's meta (report deliverable, scratch worktree;
 #   see AGENTS.md task lifecycle); --secondmate records kind=secondmate and launches in a
 #   provisioned firstmate home; the default is kind=ship.
+#   A fresh or relaunched ship checks its brief's pre-implementation alignment contract
+#   before creating or joining an endpoint. `required` is refused, `bypassed` keeps clear
+#   mechanical work direct, and `complete` is accepted only with a complete outcome.
 #   Before a secondmate launch, the home is locally fast-forwarded to the primary
 #   default-branch commit when safe; skipped syncs warn and launch unchanged.
 #   Ship/scout spawns refuse to launch unless the resolved task path is a real
@@ -1657,6 +1660,16 @@ else
   BRIEF="$DATA/$ID/brief.md"
 fi
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
+
+# The alignment contract is checked before any backend creates an endpoint or
+# any relaunch joins an existing one. An absent line remains compatible with
+# pre-alignment briefs, while new scaffolds record `bypassed` explicitly.
+if [ "$KIND" = ship ]; then
+  "$FM_ROOT/bin/fm-alignment.sh" check "$BRIEF" || {
+    echo "error: alignment barrier refused ship $ID; complete the pre-implementation alignment outcome before spawning implementation" >&2
+    exit 1
+  }
+fi
 
 delivery_rigor_rank() {  # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task mode
   case "$1" in

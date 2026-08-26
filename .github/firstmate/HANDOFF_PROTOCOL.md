@@ -188,7 +188,8 @@ Provide:
 2. supporting reasoning and evidence;
 3. alternatives considered;
 4. risks and remaining unknowns;
-5. any required change to acceptance criteria, constraints, or implementation direction.
+5. what remains engineering discretion after the recommendation;
+6. any required change to acceptance criteria, constraints, or implementation direction.
 
 Do not implement code unless explicitly requested.
 ```
@@ -252,6 +253,13 @@ that change.
 A specialist response is evidence, not automatic authority. Firstmate or the
 task owner should reconcile it with repository evidence, tests, requirements,
 and delivery constraints before acting on it.
+
+## Pre-implementation alignment
+
+When unresolved product, behavioral, contract, data-semantic, or architectural decisions block implementation, use the same source issue and `fm-specialist-request:v1` / `fm-specialist-response:v1` markers for the alignment round.
+Do not create a competing alignment marker or duplicate issue.
+The aligned outcome must make the goal, relevant facts, settled decisions, acceptance criteria, out of scope, engineering discretion, and remaining open decisions explicit before Firstmate copies it into an implementation brief.
+A specialist recommendation remains advisory until Firstmate reconciles it with repository evidence and records any genuine captain decision through the existing local captain-hold lifecycle.
 
 Suggested Firstmate instruction after the response exists:
 
