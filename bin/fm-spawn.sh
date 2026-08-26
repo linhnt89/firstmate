@@ -1659,15 +1659,6 @@ else
   BRIEF="$DATA/$ID/brief.md"
 fi
 
-# A ship with a remote delivery mode will eventually push or create/merge a
-# provider review request. Check that exact project's provider, configured
-# capability, CLI, and authentication before creating any worker endpoint or
-# task metadata. A read-only source remains usable for clone/fetch/sync, while
-# an attempted writable delivery is refused rather than silently downgraded.
-if [ "$KIND" = ship ] && [ "$MODE" != local-only ]; then
-  fm_forge_require_write_project "$PROJ_ABS" "$MODE" || exit 1
-fi
-
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
 delivery_rigor_rank() {  # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task mode
@@ -1702,6 +1693,15 @@ if [ "$KIND" = ship ]; then
      && [ "$(delivery_rigor_rank "$MODE")" -lt "$(delivery_rigor_rank "$STANDING_MODE")" ]; then
     echo "notice: $ID ships mode=$MODE while the standing posture for $PROJ_NAME is $STANDING_MODE - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state" >&2
   fi
+fi
+
+# A ship with a remote delivery mode will eventually push or create/merge a
+# provider review request. Check that exact project's provider, configured
+# capability, CLI, and authentication before creating any worker endpoint or
+# task metadata. A read-only source remains usable for clone/fetch/sync, while
+# an attempted writable delivery is refused rather than silently downgraded.
+if [ "$KIND" = ship ] && [ "$MODE" != local-only ]; then
+  fm_forge_require_write_project "$PROJ_ABS" "$MODE" || exit 1
 fi
 
 BRIEF_DIR_REAL=$(cd "$(dirname "$BRIEF")" && pwd -P)
@@ -2238,6 +2238,16 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
+  # The initial agent-free check happens before worktree reconciliation. Repeat
+  # it at the launch boundary so an agent or other foreground owner that appears
+  # while the recorded copy is being inspected cannot be joined by a second
+  # worker. This deliberately reuses the backend's exact endpoint classifier and
+  # does not close or replace the pane on a refusal.
+  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$T")
+  [ "$RELAUNCH_STATE" = dead ] || {
+    echo "error: task $ID's endpoint changed to '$RELAUNCH_STATE' before relaunch; refusing to risk a duplicate worker" >&2
+    exit 1
+  }
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
 

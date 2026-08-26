@@ -1007,7 +1007,7 @@ remove_pr_poll_artifacts() {
 pr_number_from_branch() {
   local branch=$1 origin provider host project_url out n
   [ -n "$branch" ] && [ "$branch" != HEAD ] || return 1
-  origin=$(git -C "$WT" remote get-url origin 2>/dev/null || true)
+  origin=$(fm_forge_project_origin "$PROJ" 2>/dev/null || true)
   fm_forge_context_for_origin "$origin" >/dev/null 2>&1 || return 1
   provider=$FM_FORGE_PROVIDER
   host=$FM_FORGE_HOST
@@ -1054,7 +1054,7 @@ ensure_commit_object() {
   local target=$1 commit=$2 n origin provider ref
   git -C "$WT" cat-file -e "$commit^{commit}" 2>/dev/null && return 0
   n=$(pr_number_from_target "$target") || return 1
-  origin=$(git -C "$WT" remote get-url origin 2>/dev/null || true)
+  origin=$(fm_forge_project_origin "$PROJ" 2>/dev/null || true)
   if fm_pr_url_parse "$target"; then
     provider=$FM_PR_PROVIDER
   else
@@ -1113,7 +1113,7 @@ pr_is_merged() {
     target=$(pr_number_from_branch "$branch") || return 1
   fi
   [ -n "$target" ] || return 1
-  origin=$(git -C "$WT" remote get-url origin 2>/dev/null || true)
+  origin=$(fm_forge_project_origin "$PROJ" 2>/dev/null || true)
   if [ -n "$PR_URL" ] && fm_pr_url_parse "$target"; then
     provider=$FM_PR_PROVIDER
     host=$FM_PR_HOST

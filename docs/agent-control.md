@@ -69,7 +69,8 @@ It is not deterministic across the verified adapters: codex and grok resume only
    A ship or scout relaunch requires `--note`, because the replacement inherits the local copy but none of the conversation; the note is appended to the instructions it reads.
    A secondmate relaunch does not require one and never rewrites its standing charter.
 4. **Stop the old agent** through the `exit` verb, with its postcondition.
-5. **Launch the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, which adopts the recorded endpoint and worktree instead of creating either, clears the previous harness's per-task wiring, and arms a fresh busy generation.
+   A Herdr pane proven to be a stale registered bare shell is already stopped, so this step sends no agent-specific exit input to the shell.
+5. **Launch the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, which adopts the exact recorded endpoint and worktree instead of creating or closing either, repeats the agent-free check after worktree reconciliation, clears the previous harness's per-task wiring, and arms a fresh busy generation.
 
 Switching harness is therefore one ordinary relaunch rather than a separate mechanism.
 

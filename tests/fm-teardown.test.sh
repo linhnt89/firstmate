@@ -3,8 +3,8 @@
 #
 # The check refuses to tear down a worktree whose work has not LANDED, because
 # treehouse return hard-resets the worktree. "Landed" means reachable from a remote
-# OR - for a normal ship task whose commits are not so reachable - its PR is merged
-# and GitHub reports a PR head that contains the current local work, or its content
+# OR - for a normal ship task whose commits are not so reachable - its provider
+# review request is merged and the forge reports a head that contains the current local work, or its content
 # is already in the up-to-date default branch.
 #
 # Covers three fixes:
@@ -38,17 +38,19 @@
 #   (o) fm-pr-check rerun after HEAD moved                      -> no stale pr_head
 #   (p) fm-pr-check when local HEAD lags                        -> record remote PR head
 #   (q) no-mistakes + NO pr= recorded, PR discovered by branch  -> ALLOW  (yolo/no-CI merge)
+#   (r) GitLab + deleted source branch + MR ref fallback        -> ALLOW
+#   (s) GitLab MR lookup failure + unlanded content            -> REFUSE
 #
 # Also covers backlog teardown-lock-race: a git index.lock left in the worktree by a
 # killed crew process (bin/fm-teardown.sh's teardown_treehouse_return).
-#   (r) provably-stale index.lock (old mtime, no live holder) -> lock removed, ALLOW
-#   (s) index.lock with a live holder, any age                -> lock kept, REFUSE
-#   (t) lsof error while checking index.lock                  -> lock kept, REFUSE
-#   (u) dirty worktree after stale lock cleanup               -> lock removed, REFUSE
-#   (v) non-linked repo index.lock                            -> lock removed, ALLOW
-#   (w) index.lock mtime read failure                         -> lock kept, REFUSE
-#   (x) transient lock cleared after first failed return      -> retry ALLOW
-#   (y) persistent lock (never clears, not provably stale)    -> REFUSE loudly
+#   (t) provably-stale index.lock (old mtime, no live holder) -> lock removed, ALLOW
+#   (u) index.lock with a live holder, any age                -> lock kept, REFUSE
+#   (v) lsof error while checking index.lock                  -> lock kept, REFUSE
+#   (w) dirty worktree after stale lock cleanup               -> lock removed, REFUSE
+#   (x) non-linked repo index.lock                            -> lock removed, ALLOW
+#   (y) index.lock mtime read failure                         -> lock kept, REFUSE
+#   (z) transient lock cleared after first failed return      -> retry ALLOW
+#   (aa) persistent lock (never clears, not provably stale)   -> REFUSE loudly
 set -u
 
 # shellcheck source=tests/lib.sh disable=SC1091
@@ -64,6 +66,8 @@ REAL_PS_FOR_TEST=$(command -v ps)
 export REAL_PS_FOR_TEST
 REAL_LSOF_FOR_TEST=$(command -v lsof)
 export REAL_LSOF_FOR_TEST
+REAL_JQ_FOR_TEST=$(command -v jq) || fail "jq is required for GitLab teardown coverage"
+export REAL_JQ_FOR_TEST
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)
@@ -282,6 +286,62 @@ echo "error: pull request not found" >&2
 exit 1
 SH
   chmod +x "$case_dir/fakebin/gh-axi" "$case_dir/fakebin/gh"
+}
+
+# Configure a project to retain its local bare repository while exposing a
+# canonical GitLab origin to the forge resolver and teardown's provider CLI.
+configure_gitlab_teardown_origin() {
+  local case_dir=$1 project_url="$2"
+  git -C "$case_dir/project" remote set-url origin "$project_url.git"
+  git -C "$case_dir/project" config url."$case_dir/origin.git".insteadOf "$project_url.git"
+  printf '%s\n' 'gitlab.example gitlab read-only' > "$case_dir/config/forge-capabilities"
+}
+
+add_gitlab_remote_mr_head() {
+  local case_dir=$1 parent=$2 tmp tree head
+  # Put only the parent on a temporary remote branch so a separate clone can
+  # create a child commit, then delete that branch to model source-branch cleanup.
+  git -C "$case_dir/wt" push -q origin "$parent:refs/heads/tmp-mr-parent"
+  tmp="$case_dir/_mr-head"
+  git clone -q "$case_dir/origin.git" "$tmp"
+  tree=$(git -C "$case_dir/wt" rev-parse "$parent^{tree}")
+  head=$(printf '%s\n' 'GitLab MR head' | git -C "$tmp" commit-tree "$tree" -p "$parent")
+  git -C "$tmp" push -q origin "$head:refs/merge-requests/7/head"
+  git -C "$case_dir/origin.git" update-ref -d refs/heads/tmp-mr-parent
+  git -C "$case_dir/project" update-ref -d refs/remotes/origin/tmp-mr-parent
+  rm -rf "$tmp"
+  printf '%s\n' "$head"
+}
+
+# Add the provider lookup/view responses used by the GitLab teardown cases.
+# `mr list` discovers an MR after its source branch was deleted, while `mr view`
+# returns a merged head whose commit must be fetched from the MR ref.
+add_gitlab_teardown_mocks() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/glab" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FM_TEST_GLAB_LOG:?}"
+case "${1:-} ${2:-}" in
+  "mr list")
+    [ ! -e "$(dirname "$FM_TEST_GLAB_JSON")/glab-list-fails" ] || exit 1
+    printf '%s\n' '[{"iid":7}]'
+    exit 0
+    ;;
+  "mr view")
+    cat "$FM_TEST_GLAB_JSON"
+    exit 0
+    ;;
+esac
+exit 0
+SH
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TEST_TREEHOUSE_CALLED:?}"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/glab" "$case_dir/fakebin/treehouse"
+  ln -sf "$REAL_JQ_FOR_TEST" "$case_dir/fakebin/jq"
+  : > "$case_dir/glab.log"
 }
 
 append_pr_meta_for_current_head() {
@@ -545,6 +605,9 @@ run_teardown() {
   FM_ROOT_OVERRIDE="$ROOT" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   FM_CONFIG_OVERRIDE="$case_dir/config" \
+  FM_TEST_GLAB_JSON="$case_dir/mr.json" \
+  FM_TEST_GLAB_LOG="$case_dir/glab.log" \
+  FM_TEST_TREEHOUSE_CALLED="$case_dir/treehouse.called" \
   PATH="$case_dir/fakebin:${FM_TEARDOWN_TEST_PATH:-$PATH}" \
     "$TEARDOWN" task-x1 "$@"
 }
@@ -765,6 +828,66 @@ test_no_pr_recorded_discovers_merged_pr_by_branch_allows() {
   expect_code 0 "$rc" "no-pr-branch-discovery: teardown should succeed by discovering the merged PR from the branch name"
   ! grep -q REFUSED "$case_dir/stderr" || fail "no-pr-branch-discovery: teardown printed a REFUSED line"
   pass "teardown discovers a merged PR by branch name and tears down when no pr= was ever recorded"
+}
+
+test_gitlab_merged_mr_with_deleted_source_branch_uses_mr_ref() {
+  local case_dir rc project_url local_head mr_head
+  case_dir=$(make_case gitlab-merged-deleted-source)
+  project_url=https://gitlab.example/group/subgroup/project
+  configure_gitlab_teardown_origin "$case_dir" "$project_url"
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit_file "$case_dir" feature.txt hello "add GitLab feature"
+  local_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  mr_head=$(add_gitlab_remote_mr_head "$case_dir" "$local_head")
+  printf '{"state":"merged","sha":"%s"}\n' "$mr_head" > "$case_dir/mr.json"
+  add_gitlab_teardown_mocks "$case_dir"
+
+  # The source branch and the MR head commit are not local remote-tracking
+  # refs. The latter is deliberately created in a separate clone so teardown
+  # must fetch refs/merge-requests/7/head before checking containment.
+  git -C "$case_dir/project" show-ref --verify --quiet refs/remotes/origin/fm/task-x1 \
+    && fail "gitlab-merged-deleted-source: source branch was not deleted from remote refs"
+  git -C "$case_dir/wt" cat-file -e "$mr_head^{commit}" 2>/dev/null \
+    && fail "gitlab-merged-deleted-source: MR head was already local, so ref fallback was not exercised"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "gitlab-merged-deleted-source: teardown should accept the merged MR"
+  [ -e "$case_dir/treehouse.called" ] \
+    || fail "gitlab-merged-deleted-source: teardown did not reach cleanup after MR ref fallback"
+  assert_grep "mr list --all --source-branch fm/task-x1 -R $project_url --output json" \
+    "$case_dir/glab.log" "gitlab-merged-deleted-source: MR discovery did not use the project URL"
+  assert_grep "mr view 7 -R $project_url -F json" "$case_dir/glab.log" \
+    "gitlab-merged-deleted-source: merged MR state was not read"
+  pass "teardown discovers a merged GitLab MR after source-branch deletion and fetches its MR ref"
+}
+
+test_gitlab_lookup_failure_refuses_without_cleanup() {
+  local case_dir rc project_url
+  case_dir=$(make_case gitlab-lookup-fails)
+  project_url=https://gitlab.example/group/subgroup/project
+  configure_gitlab_teardown_origin "$case_dir" "$project_url"
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit_file "$case_dir" feature.txt hello "unlanded GitLab feature"
+  add_gitlab_teardown_mocks "$case_dir"
+  : > "$case_dir/glab-list-fails"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "gitlab-lookup-fails: teardown should refuse when MR discovery fails"
+  grep -q REFUSED "$case_dir/stderr" \
+    || fail "gitlab-lookup-fails: lookup failure did not preserve the safety refusal"
+  [ ! -e "$case_dir/treehouse.called" ] \
+    || fail "gitlab-lookup-fails: cleanup ran after an inconclusive MR lookup"
+  [ -f "$case_dir/state/task-x1.meta" ] && [ -d "$case_dir/wt" ] \
+    || fail "gitlab-lookup-fails: inconclusive lookup removed task state or worktree"
+  pass "teardown refuses safely when GitLab MR lookup fails and content is not in the default branch"
 }
 
 test_squash_merged_pr_allows_replayed_unpushed_patch() {
@@ -2614,6 +2737,8 @@ test_herdr_projection_teardown_surfaces_restore_failure_without_blocking_cleanup
 test_squash_merged_branch_deleted_allows
 test_squash_merged_pr_allows_when_head_ancestor_of_pr_head
 test_no_pr_recorded_discovers_merged_pr_by_branch_allows
+test_gitlab_merged_mr_with_deleted_source_branch_uses_mr_ref
+test_gitlab_lookup_failure_refuses_without_cleanup
 test_squash_merged_pr_allows_replayed_unpushed_patch
 test_merged_pr_with_later_local_commit_refuses
 test_pr_check_does_not_refresh_stale_pr_head

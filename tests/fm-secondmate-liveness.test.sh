@@ -16,8 +16,9 @@
 #     dead, missing, ambiguous, unreadable, and unverified.
 #   - The tmux classifier returns missing only after a readable session
 #     inventory omits the exact window, regardless of display-message fallback.
-#   - The Herdr classifier preserves the proven husk mapping while separating a
-#     missing pane from an existing agent-less pane.
+#   - The Herdr classifier combines exact pane identity, registration, and
+#     repeated process proof while separating a missing pane from a recoverable
+#     lone idle shell.
 #   - fm_backend_agent_alive preserves the older three-state compatibility view.
 #   - bin/fm-bootstrap.sh's secondmate_liveness_sweep recovers only dead or
 #     missing endpoints, keeps successful recovery and already-live results
@@ -165,17 +166,156 @@ test_herdr_agent_state_preserves_husk_classifier() {
   for row in 'dead missing' 'no-agent dead' 'live alive' 'unknown unreadable'; do
     pane_state=${row%% *}
     expected=${row#* }
-    out=$(FM_TEST_PANE_STATE="$pane_state" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_pane_agent_state() { printf "%s" "$FM_TEST_PANE_STATE"; }; fm_backend_herdr_agent_state "sess:p1"' "$ROOT")
+    out=$(FM_TEST_PANE_STATE="$pane_state" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_pane_agent_state() { printf "%s" "$FM_TEST_PANE_STATE"; }; fm_backend_herdr_pane_idle_shell_proof() { case "$FM_TEST_PANE_STATE" in live) printf agent ;; no-agent) printf idle-shell ;; *) printf unknown ;; esac; }; fm_backend_herdr_agent_state "sess:p1"' "$ROOT")
     [ "$out" = "$expected" ] || fail "Herdr pane state $pane_state should map to $expected, got '$out'"
   done
 
   out=$(bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_agent_state "no-colon-target"' "$ROOT")
   [ "$out" = unreadable ] || fail "an unparseable Herdr target should classify as unreadable, got '$out'"
 
-  out=$(bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_pane_agent_state() { printf "no-agent"; }; fm_backend_herdr_agent_alive "sess:p1"' "$ROOT")
+  out=$(bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_pane_agent_state() { printf "no-agent"; }; fm_backend_herdr_pane_idle_shell_proof() { printf idle-shell; }; fm_backend_herdr_agent_alive "sess:p1"' "$ROOT")
   [ "$out" = dead ] || fail "the Herdr compatibility view should keep a no-agent husk dead, got '$out'"
 
   pass "fm_backend_herdr_agent_state: preserves missing/no-agent/live/unknown husk behavior"
+}
+
+test_herdr_positive_process_attribution_covers_supported_harnesses() {
+  bash -c '
+    . "$0/bin/backends/herdr.sh"
+    for name in claude codex opencode grok kimi pi pi-signed pi-launcher muse muse-bin-2026; do
+      fm_backend_herdr_process_is_agent "$name" "$name" || exit 1
+    done
+    fm_backend_herdr_process_is_agent node "/home/crew/.local/share/cursor-agent/versions/v/agent"
+    fm_backend_herdr_process_is_agent node "/home/crew/.local/bin/muse-bin-2026"
+    ! fm_backend_herdr_process_is_agent node node
+    ! fm_backend_herdr_process_is_agent python3 python3
+  ' "$ROOT" || fail "a supported Herdr harness process identity must remain positively attributable"
+  pass "Herdr liveness: supported harness and Cursor process identities are positively attributed"
+}
+
+# Herdr process-proof fixture helpers. The adapter is exercised through its
+# public recovery classifier with a scripted process-info stream and a real
+# fake `ps` executable, so the tests cover pane identity, repeated samples,
+# child ownership, and changing evidence without asserting source text.
+make_herdr_process_ps() {
+  local dir=$1
+  cat > "$dir/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = -axo ]; then
+  cat "$FM_HERDR_PS_ROWS"
+else
+  printf '%s\n' "${FM_HERDR_PS_STAT:-S+}"
+fi
+SH
+  chmod +x "$dir/ps"
+}
+
+run_herdr_process_state() {
+  local dir=$1 expected_pane_state=${2:-live}
+  FM_HERDR_PS_BIN="$dir/ps" \
+  FM_HERDR_PS_ROWS="$dir/ps.rows" \
+  FM_HERDR_INFO_DIR="$dir/info" \
+  FM_HERDR_INFO_COUNT="$dir/info.count" \
+  FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=3 \
+  FM_BACKEND_HERDR_IDLE_SHELL_PROOF_SAMPLES=2 \
+  FM_BACKEND_HERDR_IDLE_SHELL_PROOF_INTERVAL=0 \
+  FM_TEST_PANE_STATE="$expected_pane_state" \
+  bash -c '
+    . "$0/bin/backends/herdr.sh"
+    fm_backend_herdr_pane_agent_state() { printf "%s" "$FM_TEST_PANE_STATE"; }
+    fm_backend_herdr_cli() {
+      [ "${2:-}" = pane ] && [ "${3:-}" = process-info ] || return 1
+      local n=$(( $(cat "$FM_HERDR_INFO_COUNT" 2>/dev/null || printf 0) + 1 ))
+      printf "%s\n" "$n" > "$FM_HERDR_INFO_COUNT"
+      cat "$FM_HERDR_INFO_DIR/$n.json"
+    }
+    fm_backend_herdr_agent_state "fmtest:w1:p1"
+  ' "$ROOT"
+}
+
+herdr_process_info() {  # <file> <shell-pid> <foreground-pgid> <process-json>
+  local file=$1 shell_pid=$2 foreground_pgid=$3 process=$4
+  printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p1","shell_pid":%s,"foreground_process_group_id":%s,"foreground_processes":[%s]}}}\n' \
+    "$shell_pid" "$foreground_pgid" "$process" > "$file"
+}
+
+test_herdr_agent_state_reconciles_registration_with_repeated_process_proof() {
+  local dir out calls
+
+  dir="$TMP_ROOT/herdr-process-stale"; mkdir -p "$dir/info"; : > "$dir/info.count"
+  make_herdr_process_ps "$dir"
+  printf '4242 1\n' > "$dir/ps.rows"
+  herdr_process_info "$dir/info/1.json" 4242 4242 '{"pid":4242,"name":"zsh","argv0":"zsh"}'
+  cp "$dir/info/1.json" "$dir/info/2.json"
+  out=$(run_herdr_process_state "$dir")
+  [ "$out" = dead ] || fail "a registered Herdr pane backed by a repeated lone idle-shell proof should classify as dead, got '$out'"
+  calls=$(cat "$dir/info.count")
+  [ "$calls" -eq 2 ] || fail "the stale-registration proof should require two consecutive process samples, got $calls"
+  pass "Herdr liveness: stale registration plus repeated exact lone-idle-shell proof is dead"
+
+  dir="$TMP_ROOT/herdr-process-live"; mkdir -p "$dir/info"; : > "$dir/info.count"
+  make_herdr_process_ps "$dir"
+  printf '4242 1\n' > "$dir/ps.rows"
+  herdr_process_info "$dir/info/1.json" 4242 4242 '{"pid":4242,"name":"pi","argv0":"pi"}'
+  out=$(run_herdr_process_state "$dir")
+  [ "$out" = alive ] || fail "a registered Herdr pane with a real foreground agent process should remain alive, got '$out'"
+  [ "$(cat "$dir/info.count")" -eq 1 ] || fail "an active foreground agent should short-circuit without idle-shell retries"
+  pass "Herdr liveness: a registered foreground agent remains alive"
+
+  dir="$TMP_ROOT/herdr-process-child"; mkdir -p "$dir/info"; : > "$dir/info.count"
+  make_herdr_process_ps "$dir"
+  printf '4242 1\n5252 4242\n' > "$dir/ps.rows"
+  herdr_process_info "$dir/info/1.json" 4242 4242 '{"pid":4242,"name":"zsh","argv0":"zsh"}'
+  out=$(run_herdr_process_state "$dir")
+  [ "$out" = unreadable ] || fail "a registered pane whose shell owns a child process must refuse lifecycle recovery, got '$out'"
+  pass "Herdr liveness: shell-owned child activity stays unreadable"
+
+  dir="$TMP_ROOT/herdr-process-helper"; mkdir -p "$dir/info"; : > "$dir/info.count"
+  make_herdr_process_ps "$dir"
+  printf '4242 1\n' > "$dir/ps.rows"
+  herdr_process_info "$dir/info/1.json" 4242 4242 '{"pid":4242,"name":"helper","argv0":"helper"}'
+  out=$(run_herdr_process_state "$dir")
+  [ "$out" = unreadable ] || fail "an unrecognized foreground helper must refuse lifecycle recovery, got '$out'"
+  pass "Herdr liveness: unrecognized foreground activity stays unreadable"
+
+  for interpreter in python3 node; do
+    dir="$TMP_ROOT/herdr-process-arg-$interpreter"; mkdir -p "$dir/info"; : > "$dir/info.count"
+    make_herdr_process_ps "$dir"
+    printf '4242 1\n' > "$dir/ps.rows"
+    herdr_process_info "$dir/info/1.json" 4242 4242 "{\"pid\":4242,\"name\":\"$interpreter\",\"argv0\":\"$interpreter\",\"argv\":[\"$interpreter\",\"-c\",\"sleep\",\"/tmp/claude/input.py\",\"/tmp/codex/data\"]}"
+    out=$(run_herdr_process_state "$dir")
+    [ "$out" = unreadable ] || fail "an arbitrary $interpreter argument path must not become agent identity, got '$out'"
+  done
+  pass "Herdr liveness: arbitrary Python/Node argument paths do not create positive attribution"
+
+  dir="$TMP_ROOT/herdr-process-changing"; mkdir -p "$dir/info"; : > "$dir/info.count"
+  make_herdr_process_ps "$dir"
+  printf '4242 1\n' > "$dir/ps.rows"
+  herdr_process_info "$dir/info/1.json" 4242 4242 '{"pid":4242,"name":"zsh","argv0":"zsh"}'
+  herdr_process_info "$dir/info/2.json" 4242 4242 '{"pid":4242,"name":"pi","argv0":"pi"}'
+  out=$(run_herdr_process_state "$dir")
+  [ "$out" = unreadable ] || fail "changing shell/agent evidence must remain unreadable rather than become dead, got '$out'"
+  [ "$(cat "$dir/info.count")" -eq 2 ] || fail "changing process evidence should stop after the contradictory second sample"
+  pass "Herdr liveness: changing process ownership refuses recovery"
+
+  dir="$TMP_ROOT/herdr-process-pid-change"; mkdir -p "$dir/info"; : > "$dir/info.count"
+  make_herdr_process_ps "$dir"
+  printf '4242 1\n5252 1\n' > "$dir/ps.rows"
+  herdr_process_info "$dir/info/1.json" 4242 4242 '{"pid":4242,"name":"zsh","argv0":"zsh"}'
+  herdr_process_info "$dir/info/2.json" 5252 5252 '{"pid":5252,"name":"zsh","argv0":"zsh"}'
+  out=$(run_herdr_process_state "$dir")
+  [ "$out" = unreadable ] || fail "a changed shell pid must remain unreadable rather than become dead, got '$out'"
+  pass "Herdr liveness: exact shell-pid changes refuse recovery"
+
+  dir="$TMP_ROOT/herdr-process-ambiguous"; mkdir -p "$dir/info"; : > "$dir/info.count"
+  make_herdr_process_ps "$dir"
+  printf '4242 1\n' > "$dir/ps.rows"
+  printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"other:pane"}}}\n' > "$dir/info/1.json"
+  printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"other:pane"}}}\n' > "$dir/info/2.json"
+  out=$(run_herdr_process_state "$dir")
+  [ "$out" = unreadable ] || fail "a contradictory pane identity must remain unreadable, got '$out'"
+  pass "Herdr liveness: contradictory process identity refuses recovery"
 }
 
 # --- unit level: the generic dispatchers ------------------------------------
@@ -187,7 +327,7 @@ test_agent_state_dispatcher_and_compatibility() {
   out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
   [ "$out" = alive ] || fail "detailed dispatcher should route tmux, got '$out'"
 
-  out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source herdr; fm_backend_herdr_pane_agent_state() { printf "live"; }; fm_backend_agent_state herdr sess:p1' "$ROOT")
+  out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source herdr; fm_backend_herdr_pane_agent_state() { printf "live"; }; fm_backend_herdr_pane_idle_shell_proof() { printf agent; }; fm_backend_agent_state herdr sess:p1' "$ROOT")
   [ "$out" = alive ] || fail "detailed dispatcher should route Herdr, got '$out'"
 
   out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state zellij sess:7' "$ROOT")
@@ -543,6 +683,8 @@ test_sweep_noop_with_no_secondmate_meta() {
 test_tmux_agent_state_classifies
 test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
+test_herdr_positive_process_attribution_covers_supported_harnesses
+test_herdr_agent_state_reconciles_registration_with_repeated_process_proof
 test_agent_state_dispatcher_and_compatibility
 test_sweep_respawns_confirmed_dead_secondmate
 test_sweep_leaves_alive_secondmate_untouched

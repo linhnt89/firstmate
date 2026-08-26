@@ -25,6 +25,12 @@ FM_FORGE_ORIGIN=
 FM_FORGE_PROJECT=
 FM_FORGE_MODE=
 
+# Bash 3.2 has no case-conversion parameter expansion. Keep provider
+# resolution usable on the system Bash shipped by supported macOS releases.
+fm_forge_lower_ascii() {
+  printf '%s' "${1-}" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+}
+
 fm_forge_capability_host_valid() {
   local host=${1-}
   local LC_ALL=C
@@ -45,6 +51,7 @@ fm_forge_capability_validate() {
   }
   number=0
   local -a seen_hosts=()
+  local normalized_host
   while IFS= read -r line || [ -n "$line" ]; do
     number=$((number + 1))
     case "$line" in
@@ -73,13 +80,14 @@ fm_forge_capability_validate() {
       return 1
       ;;
     esac
+    normalized_host=$(fm_forge_lower_ascii "$host")
     case " ${seen_hosts[*]} " in
-      *" ${host,,} "*)
+      *" $normalized_host "*)
         FM_FORGE_CAPABILITY_ERROR="line $number repeats host '$host'"
         return 1
         ;;
     esac
-    seen_hosts+=("${host,,}")
+    seen_hosts+=("$normalized_host")
   done < "$file" || {
     FM_FORGE_CAPABILITY_ERROR="could not read config/forge-capabilities"
     return 1
@@ -88,7 +96,7 @@ fm_forge_capability_validate() {
 }
 
 fm_forge_origin_host() {
-  local raw=${1-} rest authority hostpart host
+  local raw=${1-} rest authority hostpart host normalized_host
   raw=${raw#"${raw%%[![:space:]]*}"}
   raw=${raw%"${raw##*[![:space:]]}"}
   [ -n "$raw" ] || return 1
@@ -116,16 +124,19 @@ fm_forge_origin_host() {
     *) return 1 ;;
   esac
   [ -n "$host" ] || return 1
-  printf '%s\n' "${host,,}"
+  normalized_host=$(fm_forge_lower_ascii "$host")
+  printf '%s\n' "$normalized_host"
 }
 
 fm_forge_config_for_host() { # <host>; prints "provider capability" or nothing
   local host=${1-} file=${2:-$FM_FORGE_CAPABILITY_FILE} line configured_host provider access
+  host=$(fm_forge_lower_ascii "$host")
   [ -f "$file" ] && [ ! -L "$file" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue ;; esac
     read -r configured_host provider access _ <<< "$line"
-    if [ "${configured_host,,}" = "${host,,}" ]; then
+    configured_host=$(fm_forge_lower_ascii "$configured_host")
+    if [ "$configured_host" = "$host" ]; then
       printf '%s %s\n' "$provider" "$access"
       return 0
     fi
@@ -133,7 +144,8 @@ fm_forge_config_for_host() { # <host>; prints "provider capability" or nothing
 }
 
 fm_forge_cli_config_has_host() { # <gh|glab> <host>
-  local cli=$1 host=${2,,} dir file
+  local cli=$1 host dir file
+  host=$(fm_forge_lower_ascii "${2-}")
   case "$cli" in
     gh)
       dir=${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME:-}/.config}/gh}
@@ -169,7 +181,8 @@ fm_forge_cli_config_has_host() { # <gh|glab> <host>
 }
 
 fm_forge_provider_for_host() { # <host>; sets FM_FORGE_PROVIDER
-  local host=${1,,} configured github_known=0 gitlab_known=0
+  local host configured github_known=0 gitlab_known=0
+  host=$(fm_forge_lower_ascii "${1-}")
   FM_FORGE_PROVIDER=
   configured=$(fm_forge_config_for_host "$host" || true)
   if [ -n "$configured" ]; then
@@ -239,13 +252,21 @@ fm_forge_context_for_origin() { # <origin>; sets FM_FORGE_*
   return 0
 }
 
+fm_forge_project_origin() { # <project-dir>; prints the configured origin before URL rewriting
+  local project=$1 origin
+  origin=$(git -C "$project" config --get remote.origin.url 2>/dev/null || true)
+  [ -n "$origin" ] || origin=$(git -C "$project" remote get-url origin 2>/dev/null || true)
+  [ -n "$origin" ] || return 1
+  printf '%s\n' "$origin"
+}
+
 fm_forge_context_for_project() { # <project-dir> <mode>
   local project=$1 mode=${2:-} origin
   # shellcheck disable=SC2034 # exported context for callers of this sourced library
   FM_FORGE_PROJECT=$project
   # shellcheck disable=SC2034 # exported context for callers of this sourced library
   FM_FORGE_MODE=$mode
-  origin=$(git -C "$project" remote get-url origin 2>/dev/null || true)
+  origin=$(fm_forge_project_origin "$project" || true)
   [ -n "$origin" ] || {
     FM_FORGE_CAPABILITY_ERROR="project '$project' has no origin remote"
     return 1
@@ -324,13 +345,9 @@ fm_forge_require_provider_tools() { # <provider> <host> <operation>
 }
 
 fm_forge_require_write_project() { # <project-dir> <mode>
-  local project=$1 mode=${2:-} origin
+  local project=$1 mode=${2:-}
   [ "$mode" != local-only ] || return 0
-  origin=$(git -C "$project" remote get-url origin 2>/dev/null || true)
   if ! fm_forge_context_for_project "$project" "$mode"; then
-    case "$origin" in
-      file://*|/*) return 0 ;;
-    esac
     echo "error: forge write for project '$project' is unavailable: $FM_FORGE_CAPABILITY_ERROR" >&2
     return 1
   fi
@@ -384,7 +401,7 @@ fm_forge_required_targets() { # prints provider|host|capability|project|mode row
     mode=$("${FM_ROOT:-.}/bin/fm-project-mode.sh" --raw "$label" 2>/dev/null | awk 'NR == 1 {print $1}')
     [ -n "$mode" ] || mode=no-mistakes
     [ "$mode" != local-only ] || continue
-    origin=$(git -C "$project" remote get-url origin 2>/dev/null || true)
+    origin=$(fm_forge_project_origin "$project" 2>/dev/null || true)
     [ -n "$origin" ] || continue
     fm_forge_origin_host "$origin" >/dev/null 2>&1 || continue
     if fm_forge_context_for_origin "$origin"; then

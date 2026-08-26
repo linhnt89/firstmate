@@ -216,7 +216,7 @@ test_version_check_refuses_old_protocol() {
 test_version_check_refuses_missing_herdr() {
   local dir out status
   dir="$TMP_ROOT/version-missing"; mkdir -p "$dir/empty-fakebin"
-  out=$( PATH="$dir/empty-fakebin:/usr/bin:/bin" \
+  out=$( PATH="$dir/empty-fakebin:${FM_TEST_SYSTEM_PATH:-/usr/bin:/bin}" \
     bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_version_check' "$ROOT" 2>&1 )
   status=$?
   [ "$status" -ne 0 ] || fail "version_check should refuse when herdr is not installed"
@@ -1771,7 +1771,7 @@ test_projection_close_busy_pane_falls_back_to_plain_close() {
   pass "herdr presentation cleanup: a pane with a live foreground process falls back to the plain close"
 }
 
-test_projection_close_transient_prompt_helper_settles_then_uses_pane_death() {
+test_projection_close_ambiguous_prompt_helper_falls_back_to_plain_close() {
   local dir log resp fb out status bgpid
   dir="$TMP_ROOT/close-transient-helper"; mkdir -p "$dir/responses"
   log="$dir/log"; resp="$dir/responses"; : > "$log"
@@ -1782,11 +1782,12 @@ test_projection_close_transient_prompt_helper_settles_then_uses_pane_death() {
   printf '%s\n' '{"result":{"panes":[{"pane_id":"w2:p2","tab_id":"w2:t2"}]}}' > "$resp/5.out"
   cp "$resp/1.out" "$resp/6.out"
   sleep 300 & bgpid=$!
-  # Sample 1: the shell is transiently redrawing its prompt (real 0.7.5 shape:
-  # a helper such as starship rides along as a second foreground process).
+  # The shell is transiently redrawing its prompt (real 0.7.5 shape: a helper
+  # such as starship rides along as a second foreground process). This is
+  # ambiguous evidence, so the shared proof must refuse recovery rather than
+  # wait for a later clean sample and risk acting on a changing endpoint.
   printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w2:p2","shell_pid":%s,"foreground_process_group_id":%s,"foreground_processes":[{"pid":99998,"name":"starship","argv":["/usr/local/bin/starship","prompt","--continuation"]},{"pid":%s,"name":"zsh","argv0":"zsh"}]}}}\n' "$bgpid" "$bgpid" "$bgpid" > "$resp/7.out"
-  # Sample 2: the helper finished; the shell is provably alone and idle.
-  death_process_info_fixture w2:p2 "$bgpid" > "$resp/8.out"
+  rm -f "$resp/8.out"
   printf '%s\n' '{"error":{"code":"pane_not_found"}}' > "$resp/9.out"
   printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","active_tab_id":"w1:t1","focused":true}]}}' > "$resp/10.out"
   printf '%s\n' '{"result":{"tabs":[{"tab_id":"w1:t1","focused":true}]}}' > "$resp/11.out"
@@ -1799,12 +1800,12 @@ test_projection_close_transient_prompt_helper_settles_then_uses_pane_death() {
     bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_projection_close_pane_focus_preserving fmtest w2:p2' "$ROOT" 2>&1)
   status=$?
   kill "$bgpid" 2>/dev/null || true; wait "$bgpid" 2>/dev/null || true
-  [ "$status" -eq 0 ] || fail "a transient prompt helper should settle into the pane-death path: $out"
-  [ "$(grep -c $'pane\x1fprocess-info' "$log")" -ge 2 ] \
-    || fail "the settle window did not retry the idle-shell proof"
-  assert_not_contains "$(cat "$log")" $'pane\x1fclose' "a transient prompt helper forced the focus-unsafe explicit close"
-  assert_not_contains "$(cat "$log")" $'tab\x1ffocus' "focus moved despite the settled pane-death removal"
-  pass "herdr presentation cleanup: a transient prompt helper settles into the pane-death path instead of the plain close"
+  [ "$status" -eq 0 ] || fail "an ambiguous prompt helper should fall back to the plain close: $out"
+  [ "$(grep -c $'pane\x1fprocess-info' "$log")" -eq 1 ] \
+    || fail "ambiguous prompt activity should not be resampled as a clean shell"
+  assert_contains "$(cat "$log")" $'pane\x1fclose' "ambiguous prompt activity did not use the plain close"
+  assert_not_contains "$(cat "$log")" $'tab\x1ffocus' "focus moved despite the conservative plain close"
+  pass "herdr presentation cleanup: an ambiguous prompt helper refuses pane-death recovery"
 }
 
 test_projection_close_death_escalates_sigkill_after_sighup_survival() {
@@ -4495,7 +4496,7 @@ test_projection_close_plain_without_move_requires_structured_removal
 test_projection_close_ambiguous_positions_fall_back_to_plain_close
 test_projection_close_move_failure_falls_back_to_plain_close
 test_projection_close_busy_pane_falls_back_to_plain_close
-test_projection_close_transient_prompt_helper_settles_then_uses_pane_death
+test_projection_close_ambiguous_prompt_helper_falls_back_to_plain_close
 test_projection_close_death_escalates_sigkill_after_sighup_survival
 test_projection_close_death_failure_falls_back_to_plain_close
 test_projection_close_death_still_restores_a_stolen_focus

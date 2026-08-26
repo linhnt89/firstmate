@@ -103,9 +103,17 @@ pr_number_from_target() {
 fetch_review_head() {
   local url=$1 n provider ref private_ref resolved
   git -C "$WT" remote get-url origin >/dev/null 2>&1 || return 1
-  fm_pr_url_parse "$url" || return 1
-  provider=$FM_PR_PROVIDER
-  n=$FM_PR_NUMBER
+  if fm_pr_url_parse "$url"; then
+    provider=$FM_PR_PROVIDER
+    n=$FM_PR_NUMBER
+  else
+    # A bare numeric pr= is the legacy GitHub form. Infer the provider from the
+    # worktree origin so the old refs/pull/<n>/head behavior remains current
+    # after a newer remote head is pushed.
+    n=$(pr_number_from_target "$url") || return 1
+    fm_forge_context_for_project "$PROJ" "review" || return 1
+    provider=$FM_FORGE_PROVIDER
+  fi
   case "$provider" in
     github)
       ref="refs/pull/$n/head"

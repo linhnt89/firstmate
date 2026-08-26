@@ -11,6 +11,7 @@
 #   (d) pr= present but PR head unreachable -> fallback to local branch + warning
 #   (e) pr= + STALE recorded pr_head= + newer remote pull head -> must use fetched head
 #       (this is the class that bit reviewers holding merges over "missing" fixes)
+#   (f) bare numeric pr= keeps the legacy GitHub pull-head fetch and stays current
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -151,6 +152,29 @@ test_pr_meta_fetches_pull_head_without_recorded_sha() {
   pass "fm-review-diff fetches refs/pull/<n>/head when pr_head= is absent"
 }
 
+test_bare_numeric_pr_meta_fetches_newer_pull_head() {
+  local case_dir out stale_sha
+  case_dir=$(make_case numeric-pr-fetch)
+  stale_and_pr_commits "$case_dir"
+  stale_sha=$(git -C "$case_dir/wt" rev-parse fm/task-x1)
+  # Keep the fixture's local bare repository while giving the legacy numeric
+  # target the forge origin it must use to infer GitHub.
+  git -C "$case_dir/wt" remote set-url origin https://github.com/example/repo.git
+  git -C "$case_dir/wt" config url."$case_dir/origin.git".insteadOf https://github.com/example/repo.git
+  git -C "$case_dir/wt" push -q origin "pr-head-tmp:refs/pull/9/head"
+  write_task_meta "$case_dir" "pr=9" "pr_head=$stale_sha"
+
+  out=$(run_review_diff "$case_dir" task-x1 2> "$case_dir/stderr")
+
+  assert_contains "$out" '+pr-fixed' \
+    "numeric-pr-fetch: diff should use the newer live GitHub pull head"
+  assert_not_contains "$out" 'stale-local' \
+    "numeric-pr-fetch: diff must not use the stale local or recorded head"
+  assert_not_contains "$(cat "$case_dir/stderr")" 'warning: review request head unavailable' \
+    "numeric-pr-fetch: legacy bare-number fetch should succeed"
+  pass "fm-review-diff preserves bare numeric pr= compatibility with a newer remote PR head"
+}
+
 test_no_pr_meta_uses_local_branch() {
   local case_dir out
   case_dir=$(make_case no-pr-meta)
@@ -190,6 +214,7 @@ test_unreachable_pr_head_falls_back_with_warning() {
 test_pr_meta_uses_pr_head_not_stale_local
 test_gitlab_mr_head_uses_merge_request_ref
 test_pr_meta_fetches_pull_head_without_recorded_sha
+test_bare_numeric_pr_meta_fetches_newer_pull_head
 test_stale_recorded_pr_head_loses_to_fetched_pull_head
 test_no_pr_meta_uses_local_branch
 test_unreachable_pr_head_falls_back_with_warning

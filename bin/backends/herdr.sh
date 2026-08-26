@@ -77,6 +77,10 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # every backend so the decision cannot drift.
 # shellcheck source=bin/fm-composer-lib.sh
 . "$FM_BACKEND_HERDR_ROOT/bin/fm-composer-lib.sh"
+# Cursor's process identity is structural rather than a command-name match.
+# Reuse its single classifier for Herdr's positive agent-process proof.
+# shellcheck source=bin/fm-cursor-lib.sh
+. "$FM_BACKEND_HERDR_ROOT/bin/fm-cursor-lib.sh"
 
 # Shared, backend-neutral normalized-transition shape and the single-owner
 # status->action policy table (bin/fm-transition-lib.sh). This adapter's event
@@ -1175,79 +1179,236 @@ fm_backend_herdr_pid_is_bare_shell() {  # <ps-bin> <pid>
   return 1
 }
 
-# fm_backend_herdr_pane_idle_shell_pid: print the shell pid of <pane-id> only
-# when the exact pane provably holds one lone idle recognized shell: pane
-# process-info agrees on the pane id, the shell pid is both the foreground
-# process group and the sole foreground process, the foreground process name
-# and argv0 resolve to the same recognized shell, the operating-system
-# process table shows exactly that one shell row with no child process, and
-# the shell sits in a sleeping or idle state.
-# An idle interactive shell transiently hosts short-lived prompt helpers
-# (verified on the real 0.7.5 lab: a workspace.move relayout makes zsh redraw
-# its prompt, spawning starship as a second foreground process for a few
-# samples), so the proof retries strict single samples for a bounded settle
-# window and succeeds on the first fully clean one; a genuinely busy pane
-# fails every sample and still refuses.
-# This is the single owner of the idle-shell proof; the session-start
-# projection cleanup and every pane-death close path both rely on it.
-fm_backend_herdr_pane_idle_shell_pid() {  # <session> <pane-id>
-  local attempt=0 max_attempts=${FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS:-10}
-  while :; do
-    if fm_backend_herdr_pane_idle_shell_sample "$1" "$2"; then
+# fm_backend_herdr_process_is_agent: return success only for a process whose
+# executable identity belongs to one of the verified worker harnesses. A
+# registered Herdr pane is not enough by itself: a stale registration can sit
+# above a shell, helper, or unrelated foreground process. Exact path components
+# cover versioned installs; the basename rules cover stable launchers, and
+# Cursor's structural matcher handles its bundled node process. Deliberately do
+# not inspect arbitrary argument text: a user-supplied `/tmp/claude/...` or
+# `/tmp/codex/...` argument is not executable identity.
+fm_backend_herdr_process_is_agent() {  # <name> <argv0>
+  local name=$1 argv0=$2 value harness base value_base
+  base=${name##*/}
+  base=${base#-}
+  case "$base" in
+    claude|codex|opencode|grok|kimi|pi|pi-signed|pi-launcher|Pi|muse|muse-bin-*)
       return 0
-    fi
-    attempt=$((attempt + 1))
-    [ "$attempt" -lt "$max_attempts" ] || return 1
-    sleep 0.1
+      ;;
+  esac
+  for value in "$name" "$argv0"; do
+    value_base=${value##*/}
+    value_base=${value_base#-}
+    case "$value_base" in
+      muse|muse-bin-*|pi-launcher) return 0 ;;
+    esac
+    for harness in claude codex opencode grok kimi pi pi-signed pi-launcher; do
+      case "/$value/" in
+        */"$harness"/*) return 0 ;;
+      esac
+    done
+    case "/$value/" in
+      */muse/*) return 0 ;;
+    esac
   done
+  fm_cursor_process_matches "$name" "" "$argv0"
 }
 
-# fm_backend_herdr_pane_idle_shell_sample: one strict instantaneous
-# observation for fm_backend_herdr_pane_idle_shell_pid, which owns the proof
-# contract and the settle retry.
-fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id>
-  local session=$1 pane=$2 info shell_pid foreground_pgid count
-  local process_pid name argv0 shell_name rows stat ps_bin
-  info=$(fm_backend_herdr_cli "$session" pane process-info --pane "$pane" 2>/dev/null) || return 1
+# fm_backend_herdr_pane_process_observation: one strict observation of the
+# exact pane's process owner. It prints one of:
+#   idle-shell<TAB><pid> - the pane is a lone recognized idle shell with no child;
+#   agent                - one foreground process is positively attributed to a
+#                          verified worker harness;
+#   ambiguous            - activity exists, but ownership is not attributable;
+#   unknown              - pane identity, process information, or the process
+#                          table is unreadable or contradictory.
+# Shell-owned children, helper processes, and multi-process foreground groups
+# are deliberately `ambiguous`, never generic live-agent evidence. An unknown
+# process is never treated as dead.
+fm_backend_herdr_pane_process_observation() {  # <session> <pane-id>
+  local session=$1 pane=$2 info shell_pid foreground_pgid count process_pid
+  local name argv0 shell_name rows stat ps_bin table_state
+  info=$(fm_backend_herdr_cli "$session" pane process-info --pane "$pane" 2>/dev/null) || {
+    printf 'unknown'
+    return 0
+  }
   printf '%s' "$info" | jq -e --arg pane "$pane" '
     .result.type == "pane_process_info"
     and .result.process_info.pane_id == $pane
-  ' >/dev/null 2>&1 || return 1
+  ' >/dev/null 2>&1 || {
+    printf 'unknown'
+    return 0
+  }
   shell_pid=$(printf '%s' "$info" | jq -er \
-    '.result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || return 1
+    '.result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || {
+    printf 'unknown'
+    return 0
+  }
   foreground_pgid=$(printf '%s' "$info" | jq -er \
-    '.result.process_info.foreground_process_group_id | select(type == "number" and . > 1) | floor' 2>/dev/null) || return 1
-  [ "$foreground_pgid" = "$shell_pid" ] || return 1
+    '.result.process_info.foreground_process_group_id | select(type == "number" and . > 1) | floor' 2>/dev/null) || {
+    printf 'unknown'
+    return 0
+  }
   count=$(printf '%s' "$info" | jq -er \
-    '.result.process_info.foreground_processes | select(type == "array") | length' 2>/dev/null) || return 1
-  [ "$count" -eq 1 ] || return 1
+    '.result.process_info.foreground_processes | select(type == "array") | length' 2>/dev/null) || {
+    printf 'unknown'
+    return 0
+  }
+  [ "$count" -gt 0 ] || {
+    printf 'unknown'
+    return 0
+  }
+  [ "$count" -eq 1 ] || {
+    printf 'ambiguous'
+    return 0
+  }
   process_pid=$(printf '%s' "$info" | jq -er \
-    '.result.process_info.foreground_processes[0].pid | select(type == "number") | floor' 2>/dev/null) || return 1
-  [ "$process_pid" = "$shell_pid" ] || return 1
+    '.result.process_info.foreground_processes[0].pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || {
+    printf 'unknown'
+    return 0
+  }
   name=$(printf '%s' "$info" | jq -er \
-    '.result.process_info.foreground_processes[0].name | select(type == "string" and length > 0)' 2>/dev/null) || return 1
+    '.result.process_info.foreground_processes[0].name | select(type == "string" and length > 0)' 2>/dev/null) || {
+    printf 'unknown'
+    return 0
+  }
   argv0=$(printf '%s' "$info" | jq -er '
     .result.process_info.foreground_processes[0] as $process
     | ($process.argv0 // $process.argv[0])
     | select(type == "string" and length > 0)
-  ' 2>/dev/null) || return 1
+  ' 2>/dev/null) || {
+    printf 'unknown'
+    return 0
+  }
+  if fm_backend_herdr_process_is_agent "$name" "$argv0"; then
+    printf 'agent'
+    return 0
+  fi
+  [ "$process_pid" = "$shell_pid" ] || {
+    printf 'ambiguous'
+    return 0
+  }
+  [ "$foreground_pgid" = "$shell_pid" ] || {
+    printf 'ambiguous'
+    return 0
+  }
   shell_name=${name##*/}
   argv0=${argv0#-}
   argv0=${argv0##*/}
-  [ "$argv0" = "$shell_name" ] || return 1
-  case "$shell_name" in sh|bash|zsh|dash|ksh|fish) ;; *) return 1 ;; esac
+  if [ "$argv0" != "$shell_name" ]; then
+    printf 'ambiguous'
+    return 0
+  fi
+  case "$shell_name" in
+    sh|bash|zsh|dash|ksh|fish) ;;
+    *) printf 'ambiguous'; return 0 ;;
+  esac
 
   ps_bin=${FM_HERDR_PS_BIN:-ps}
-  command -v "$ps_bin" >/dev/null 2>&1 || return 1
-  rows=$("$ps_bin" -axo pid=,ppid= 2>/dev/null) || return 1
-  printf '%s\n' "$rows" | awk -v shell="$shell_pid" '
+  command -v "$ps_bin" >/dev/null 2>&1 || {
+    printf 'unknown'
+    return 0
+  }
+  rows=$("$ps_bin" -axo pid=,ppid= 2>/dev/null) || {
+    printf 'unknown'
+    return 0
+  }
+  table_state=$(printf '%s\n' "$rows" | awk -v shell="$shell_pid" '
+    NF == 0 { next }
+    NF != 2 { bad=1; next }
     $1 == shell { found++ }
     $2 == shell { child++ }
-    END { exit(found == 1 && child == 0 ? 0 : 1) }
-  ' || return 1
-  stat=$("$ps_bin" -p "$shell_pid" -o stat= 2>/dev/null | tr -d '[:space:]') || return 1
-  case "$stat" in S*|I*) ;; *) return 1 ;; esac
-  printf '%s\n' "$shell_pid"
+    END {
+      if (bad || found != 1) print "unknown"
+      else if (child != 0) print "ambiguous"
+      else print "idle-shell"
+    }
+  ')
+  [ -n "$table_state" ] || table_state=unknown
+  case "$table_state" in
+    ambiguous|unknown)
+      printf '%s' "$table_state"
+      return 0
+      ;;
+  esac
+  stat=$("$ps_bin" -p "$shell_pid" -o stat= 2>/dev/null | tr -d '[:space:]') || {
+    printf 'unknown'
+    return 0
+  }
+  case "$stat" in
+    S*|I*) printf 'idle-shell\t%s' "$shell_pid" ;;
+    *) printf 'ambiguous' ;;
+  esac
+}
+
+# fm_backend_herdr_pane_idle_shell_proof: require repeated, consecutive strict
+# samples of the same exact pane and shell pid. Agent or ambiguous activity
+# seen before a clean proof, a changed pid, or a failed read after a clean sample
+# makes the result unknown rather than allowing a later clean sample to erase
+# changing evidence. A leading unreadable sample may be retried for the
+# short-lived process-info race already observed during Herdr relayout; it never
+# licenses a dead result by itself.
+fm_backend_herdr_pane_idle_shell_proof() {  # <session> <pane-id>
+  local session=$1 pane=$2 attempt=0 max_attempts=${FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS:-10}
+  local required=${FM_BACKEND_HERDR_IDLE_SHELL_PROOF_SAMPLES:-2}
+  local interval=${FM_BACKEND_HERDR_IDLE_SHELL_PROOF_INTERVAL:-0.1}
+  local observation verdict pid candidate='' samples=0
+  case "$max_attempts:$required" in
+    *[!0-9:]*|*:0|0:*) printf 'unknown'; return 0 ;;
+  esac
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    observation=$(fm_backend_herdr_pane_process_observation "$session" "$pane") || observation=unknown
+    verdict=${observation%%$'\t'*}
+    case "$verdict" in
+      idle-shell)
+        pid=${observation#*$'\t'}
+        if [ -z "$candidate" ]; then
+          candidate=$pid
+          samples=1
+        elif [ "$pid" != "$candidate" ]; then
+          printf 'unknown'
+          return 0
+        else
+          samples=$((samples + 1))
+        fi
+        if [ "$samples" -ge "$required" ]; then
+          printf 'idle-shell\t%s' "$candidate"
+          return 0
+        fi
+        ;;
+      agent|ambiguous)
+        if [ "$samples" -gt 0 ]; then printf 'unknown'; else printf '%s' "$verdict"; fi
+        return 0
+        ;;
+      *)
+        [ "$samples" -eq 0 ] || { printf 'unknown'; return 0; }
+        ;;
+    esac
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt "$max_attempts" ] || break
+    sleep "$interval"
+  done
+  printf 'unknown'
+}
+
+# fm_backend_herdr_pane_idle_shell_pid: print the shell pid only after the
+# shared repeated proof positively identifies the exact pane's lone idle shell.
+# This is used by pane-death cleanup and by lifecycle liveness, so both paths
+# cannot drift on the exact-pane/process-ownership boundary.
+fm_backend_herdr_pane_idle_shell_pid() {  # <session> <pane-id>
+  local proof
+  proof=$(fm_backend_herdr_pane_idle_shell_proof "$1" "$2")
+  [ "${proof%%$'\t'*}" = idle-shell ] || return 1
+  printf '%s\n' "${proof#*$'\t'}"
+}
+
+# fm_backend_herdr_pane_idle_shell_sample: one strict instantaneous observation
+# retained for the pid-exact SIGKILL revalidation path.
+fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id>
+  local observation
+  observation=$(fm_backend_herdr_pane_process_observation "$1" "$2")
+  [ "${observation%%$'\t'*}" = idle-shell ] || return 1
+  printf '%s\n' "${observation#*$'\t'}"
 }
 
 # fm_backend_herdr_projection_order_best_effort: place the exact workspace id
@@ -1922,17 +2083,31 @@ fm_backend_herdr_tab_is_husk() {  # <session> <pane_id>
 }
 
 # fm_backend_herdr_agent_state: recovery-grade state for the same session-start
-# sweep as the tmux classifier. It reuses the husk classifier rather than
-# creating a second Herdr state machine: a structurally gone pane is `missing`,
-# a confirmed agent-less pane is `dead`, a registered agent is `alive`, and an
-# unexpected or failed API read is `unreadable`.
+# sweep as the tmux classifier. A structurally gone pane is `missing`. A
+# no-agent response is `dead` only after the exact pane is repeatedly proven to
+# be the same lone idle shell; an unattributed, changing, unreadable, or
+# contradictory process result refuses. Herdr registration is not enough to
+# report `alive`: a registered pane whose exact process identity is repeatedly
+# proven to be the same lone idle shell is a stale registration and is also
+# `dead`. Only a registered pane with one positively attributed foreground
+# harness process is `alive`; shell-owned children, helpers, and other ambiguous
+# activity are `unreadable`.
 fm_backend_herdr_agent_state() {  # <target>
-  local target=$1
+  local target=$1 pane_state process_proof
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
-  case "$(fm_backend_herdr_pane_agent_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")" in
+  pane_state=$(fm_backend_herdr_pane_agent_state \
+    "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")
+  case "$pane_state" in
     dead) printf 'missing' ;;
-    no-agent) printf 'dead' ;;
-    live) printf 'alive' ;;
+    no-agent|live)
+      process_proof=$(fm_backend_herdr_pane_idle_shell_proof \
+        "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")
+      case "${process_proof%%$'\t'*}" in
+        idle-shell) printf 'dead' ;;
+        agent) [ "$pane_state" = live ] && printf 'alive' || printf 'unreadable' ;;
+        *) printf 'unreadable' ;;
+      esac
+      ;;
     *) printf 'unreadable' ;;
   esac
 }
