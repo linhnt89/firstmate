@@ -55,7 +55,7 @@ printf 'network=%s detect_only=%s\n' \
 # is owned by tests/fm-bootstrap.test.sh.
 if [ -n "${FM_TIMING_LOG:-}" ]; then
   . "$(dirname "$0")/fm-timing-lib.sh"
-  fm_timing_record phase "${FM_FAKE_TIMING_PHASE:-gh-auth}" \
+  fm_timing_record phase "${FM_FAKE_TIMING_PHASE:-forge-auth}" \
     "$(( $(fm_timing_now_ms) - 1500 ))" "${FM_FAKE_TIMING_DETAIL:-}"
 fi
 [ -z "${FM_FAKE_BOOTSTRAP_SLEEP:-}" ] || sleep "$FM_FAKE_BOOTSTRAP_SLEEP"

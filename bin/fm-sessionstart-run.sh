@@ -32,8 +32,8 @@
 # exit 2 blocks session initialization, so a failed session start must reach the
 # agent as digest text it can act on, never as a refusal to open the session.
 # A lock another live session holds and a truncated digest are reported inside
-# the digest, while broken GitHub auth arrives through the deferred network
-# result inline or as a wake, for exactly that reason.
+# the digest, while broken provider authentication arrives through the deferred
+# network result inline or as a notification, for exactly that reason.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

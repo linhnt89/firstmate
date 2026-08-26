@@ -123,6 +123,26 @@ test_single_stale_first_read_is_not_accepted() {
 # A pane that reports the real worktree from the very first read still only
 # costs the loop's existing one-second inter-poll sleep to confirm - not an
 # extra full cycle on top of that.
+test_read_only_forge_refuses_remote_delivery_before_endpoint_creation() {
+  local rec id out status
+  id=settle-read-only-forge-z3
+  rec=$(make_settle_case settle-read-only-forge "$id" 0)
+  read_settle_record "$rec"
+  printf '%s\n' 'github.com github read-only' > "$HOME_DIR/config/forge-capabilities"
+  git -C "$PROJ_DIR" remote set-url origin https://github.com/example/repo.git
+
+  set +e
+  out=$(run_settle_spawn "$id")
+  status=$?
+  set -e
+  [ "$status" -ne 0 ] || fail "spawn succeeded despite a read-only GitHub capability"
+  assert_contains "$out" "configured read-only" \
+    "read-only forge refusal did not name the unavailable capability"
+  assert_absent "$HOME_DIR/state/$id.meta" \
+    "read-only forge refusal created task metadata before endpoint creation"
+  pass "remote delivery refuses a read-only forge capability before creating an endpoint"
+}
+
 test_already_settled_pane_costs_one_confirm_sleep() {
   local rec id out status start end elapsed
   id=settle-already-settled-z2
@@ -143,5 +163,6 @@ test_already_settled_pane_costs_one_confirm_sleep() {
 
 test_single_stale_first_read_is_not_accepted
 test_already_settled_pane_costs_one_confirm_sleep
+test_read_only_forge_refuses_remote_delivery_before_endpoint_creation
 
 echo "# all fm-spawn-worktree-settle tests passed"

@@ -2,8 +2,8 @@
 # fm-startup-network.sh - the deferred network stage of a session start.
 #
 # WHY THIS EXISTS. Every external-network call a session start makes used to run
-# BEFORE the digest printed, on a hook that blocks session initialization: `gh
-# auth status`, the secondmate liveness and convergence sweeps (per-secondmate
+# BEFORE the digest printed, on a hook that blocks session initialization:
+# provider auth status, the secondmate liveness and convergence sweeps (per-secondmate
 # remote probes, which bootstrap runs concurrently), pending remote
 # handoff delivery, and the fleet-sync fetch of every project clone. None of
 # those calls is individually bounded, so one unreachable host could consume the
@@ -84,7 +84,7 @@
 #                             wake.
 #   .startup-network.timings  per-step elapsed times for the last run, in
 #                             bin/fm-timing-lib.sh's tab-separated format: the
-#                             stage total, one record per network phase (gh auth,
+#                             stage total, one record per network phase (forge auth,
 #                             secondmate liveness, secondmate convergence, handoff
 #                             delivery, fleet sync), one per secondmate for the
 #                             remote-touching steps (id and host), and one per
@@ -188,8 +188,8 @@ worker_alive() {
 # confirmed yet" is always answerable from the status record alone.
 phase_label() {  # <phases>
   case "$1" in
-    probe) printf 'GitHub authentication' ;;
-    probe,sweeps) printf 'GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, and project clone refresh with its drift reporting' ;;
+    probe) printf 'forge authentication' ;;
+    probe,sweeps) printf 'forge authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, and project clone refresh with its drift reporting' ;;
     *) printf 'the deferred network checks' ;;
   esac
 }

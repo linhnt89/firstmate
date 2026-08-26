@@ -215,6 +215,8 @@ glab_merge_line() {
 run_pr_merge() {
   local case_dir=$1 rc; shift
   FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="$case_dir" \
+  FM_CONFIG_OVERRIDE="$case_dir/config" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   FM_TEST_GH_AXI_LOG="$case_dir/gh-axi.log" \
   FM_TEST_GLAB_LOG="$case_dir/glab.log" \
@@ -793,6 +795,43 @@ test_gitlab_head_override_args_refuse_before_recording() {
   pass "fm-pr-merge refuses a GitLab head override before recording state"
 }
 
+test_forge_write_capability_refuses_before_recording() {
+  local case_dir rc
+
+  case_dir=$(make_case github-auth-refused)
+  mkdir -p "$case_dir/config"
+  cat > "$case_dir/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  chmod +x "$case_dir/fakebin/gh"
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/77 \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "github-auth-refused: a GitHub merge must refuse without auth"
+  assert_grep 'GitHub write capability is unavailable' "$case_dir/stderr" \
+    "github-auth-refused: refusal did not name the missing GitHub capability"
+  assert_no_grep 'pr=https://github.com/example/repo/pull/77' "$case_dir/state/task-x1.meta" \
+    "github-auth-refused: metadata was recorded before capability refusal"
+  pass "a GitHub merge refuses before recording when GitHub auth is unavailable"
+
+  case_dir=$(make_gitlab_case gitlab-read-only)
+  mkdir -p "$case_dir/config"
+  printf '%s\n' 'gitlab.example gitlab read-only' > "$case_dir/config/forge-capabilities"
+  set +e
+  run_pr_merge "$case_dir" task-x1 "$MR_URL" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "gitlab-read-only: a GitLab merge must refuse with read-only capability"
+  assert_grep 'configured read-only' "$case_dir/stderr" \
+    "gitlab-read-only: refusal did not name the read-only capability"
+  assert_no_grep "pr=$MR_URL" "$case_dir/state/task-x1.meta" \
+    "gitlab-read-only: metadata was recorded before capability refusal"
+  pass "a GitLab merge refuses before recording when the host is read-only"
+}
+
 test_github_still_forwards_sha_arg() {
   local case_dir
   case_dir=$(make_case github-sha-arg)
@@ -821,6 +860,7 @@ test_bundled_repo_override_args_refuse_before_recording
 test_explicit_merge_method_not_overridden
 test_method_equals_merge_method_not_overridden
 test_parses_pr_url_for_gh_axi
+test_forge_write_capability_refuses_before_recording
 test_github_still_forwards_sha_arg
 test_gitlab_url_resolves_and_merges
 test_gitlab_host_comes_from_the_url

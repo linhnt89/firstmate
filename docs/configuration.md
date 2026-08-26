@@ -351,11 +351,16 @@ Secondmate homes inherit this file from the primary, so a secondmate's own crewm
 
 On session start the first mate detects what its required toolchain is missing or too old and lists each problem with either an exact install command or manual instructions.
 It installs automatically supported tools only after you say go; manual-only tools remain for you to install from the printed instructions.
-Required tools come in two parts: a universal toolchain every home needs regardless of backend, and a per-backend delta that follows the runtime backend actually resolved for this home.
-The universal toolchain is node, git, gh with GitHub auth via `gh auth login`, no-mistakes v1.31.2 or newer, compatible gh-axi, chrome-devtools-axi, compatible lavish-axi, compatible tasks-axi per "Backlog backend" above, and compatible quota-axi.
-[`bin/fm-bootstrap.sh`](../bin/fm-bootstrap.sh) owns the axi-family floor policy and the gh-axi and lavish-axi floors, while [`bin/fm-tasks-axi-lib.sh`](../bin/fm-tasks-axi-lib.sh) and [`bin/fm-quota-axi-lib.sh`](../bin/fm-quota-axi-lib.sh) hold their own tools' floor constants.
+Required tools come in three parts: a universal toolchain every home needs regardless of forge or backend, provider tools required by a writable project, and a per-backend delta that follows the runtime backend actually resolved for this home.
+The universal toolchain is node, git, no-mistakes v1.31.2 or newer, chrome-devtools-axi, compatible lavish-axi, compatible tasks-axi per "Backlog backend" above, and compatible quota-axi.
+A GitLab project using the no-mistakes validation pipeline needs no-mistakes v1.32.0 or newer because that release added self-hosted GitLab provider detection; the installed v1.46.0 pipeline is within this supported boundary.
+[`bin/fm-bootstrap.sh`](../bin/fm-bootstrap.sh) owns the axi-family floor policy and the provider-aware tool checks, while [`bin/fm-tasks-axi-lib.sh`](../bin/fm-tasks-axi-lib.sh) and [`bin/fm-quota-axi-lib.sh`](../bin/fm-quota-axi-lib.sh) hold their own tools' floor constants.
 This section is the single owner of that universal toolchain list; backend guides' prerequisites point here and add only their backend-specific tools.
-In that list, no-mistakes runs the validation pipeline, gh-axi, chrome-devtools-axi, and lavish-axi cover GitHub, browser, and rich-review operations, and tasks-axi plus quota-axi back backlog mutations and quota-aware array dispatch.
+In that list, no-mistakes runs the validation pipeline, chrome-devtools-axi and lavish-axi cover browser and rich-review operations, and tasks-axi plus quota-axi back backlog mutations and quota-aware array dispatch.
+A project delivered through GitHub additionally needs `gh`, `gh-axi`, and GitHub authentication through `gh auth login`.
+A project delivered through GitLab additionally needs `glab`, `jq`, and authentication to the target instance through `glab auth login --hostname <host>`.
+The optional `/bearings include PRs` GitHub enrichment also needs `gh` when that enrichment is explicitly requested, but it is not a startup or delivery prerequisite for GitLab-only work.
+These provider checks are scoped to projects whose registered delivery mode is not `local-only`, and a read-only host capability suppresses write prerequisites without changing that delivery mode.
 The per-backend delta is required only for the backend resolved from `FM_BACKEND`, then `config/backend`, then runtime auto-detection, then default `tmux`, so a home is never told to install a tool an inactive backend or feature would need.
 That delta is owned in code by `fm_backend_required_tools` in `bin/fm-backend.sh`: the resolved backend's own session-provider CLI (`tmux`, `herdr`, `zellij`, `orca`, or `cmux`), `jq` for the JSON-emitting experimental adapters (`herdr`, `zellij`, `cmux`) whose spawn and liveness paths parse the backend's JSON output, and the `treehouse` worktree provider for every session-provider-only backend (`tmux`, `herdr`, `zellij`, `cmux`).
 Backend tool availability uses the adapter's own executable resolver, so bootstrap and spawn agree on supported non-`PATH` locations such as cmux's bundled CLI.
@@ -366,9 +371,12 @@ When `config/crew-dispatch.json` exists, bootstrap also requires `jq` for dispat
 When Relay is opted in, bootstrap also requires `curl` and `jq` before arming the relay poll shim.
 `tasks-axi` and `quota-axi` are required bootstrap tools in every profile, the same class as `lavish-axi`.
 An absent or incompatible `tasks-axi` reports `MISSING: tasks-axi (install: npm install -g tasks-axi)`; when `config/backlog-backend` is not `manual` and compatible `tasks-axi` is on `PATH`, bootstrap stays silent and firstmate uses its verbs for routine backlog mutations, otherwise it hand-edits `data/backlog.md` until installation is approved and completed.
-An absent or incompatible `gh-axi` reports `MISSING: gh-axi (install: npm install -g gh-axi && gh-axi setup hooks)`.
+An absent or incompatible `gh-axi` reports `MISSING: gh-axi (install: npm install -g gh-axi && gh-axi setup hooks)` when a writable GitHub project requires it.
+An absent `glab` reports `MISSING: glab (install: brew install glab  # or the platform's package manager)` when a writable GitLab project requires it.
+An absent `jq` reports `MISSING: jq (install: brew install jq  # or the platform's package manager)` when a writable GitLab project requires it.
 An absent or incompatible `lavish-axi` reports `MISSING: lavish-axi (install: npm install -g lavish-axi && lavish-axi setup hooks)`.
 An absent or too-old `quota-axi` reports `MISSING: quota-axi (install: npm install -g quota-axi)`; firstmate cannot resolve a profile array without a compatible binary.
+
 Bootstrap also reports a `TANGLE:` line when `FM_ROOT` is on a named non-default branch; follow the printed checkout remediation rather than treating it as an installable tool problem.
 In a read-only session that did not get the fleet lock, the same line is advisory and omits the checkout command.
 The locked session-start deferred network stage runs bootstrap's best-effort project clone refresh through `fm-fleet-sync.sh`; [`fm-bootstrap.sh`'s header](../bin/fm-bootstrap.sh) owns the exact clone-refresh overlap, liveness-before-convergence, per-mate concurrency, ordered diagnostic replay, and sequential-fallback contract.
@@ -391,6 +399,26 @@ A changed remote home instead receives one durably recorded marked re-read instr
 The locked bootstrap inheritance pass uses the same placement-specific behavior; see `secondmate-provisioning` for the single contract owner.
 That live discovery starts from `state/*.meta` records with `kind=secondmate`; `data/secondmates.md` only backfills `home=` for older or incomplete meta records.
 Skipped items, such as a destination checkout that does not yet gitignore the item, are visible warnings but not hard failures.
+
+### Mixed-forge homes
+
+A home may keep GitHub repositories as read-only sources while delivering writable projects to GitLab.
+For a host that is not recognizable from its URL, create the local gitignored `config/forge-capabilities` file with records such as:
+
+```text
+github.example github read-only
+forge.example gitlab read-write
+```
+
+Use the actual hostnames from the corresponding project origins, without credentials, ports, or paths.
+The provider mapping is host-scoped, so nested GitLab group and subgroup paths remain intact and do not need separate records.
+The universal tools remain required in every home, while `gh` and `gh-axi` are checked only for writable GitHub delivery and `glab` plus `jq` only for writable GitLab delivery.
+Clone, fetch, and fleet synchronization use Git and remain available for read-only sources.
+If a task requests a remote delivery mode against a read-only or unmapped host, Firstmate refuses before starting it and explains the provider-specific capability or login that is missing.
+Bootstrap also reports a `FORGE_CAPABILITY:` line when a remote-delivery project has an unknown provider or malformed local forge capability configuration.
+Configure the local, gitignored `config/forge-capabilities` file with one `<host> <github|gitlab> <read-only|read-write>` record per arbitrary host that cannot be inferred from its URL.
+Known GitHub and GitLab hosts default to read-write for backward compatibility, while a `read-only` record is appropriate for a clone that is only a fetch source.
+A writable delivery never downgrades to local-only when its provider capability is read-only or unavailable; dispatch and merge refuse with a provider-specific remediation.
 
 ## Watched tool updates (config/watched-tools.json)
 

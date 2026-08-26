@@ -256,6 +256,8 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-forge-capability-lib.sh
+. "$SCRIPT_DIR/fm-forge-capability-lib.sh"
 # shellcheck source=bin/fm-trace-context-lib.sh
 . "$SCRIPT_DIR/fm-trace-context-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh
@@ -1082,6 +1084,15 @@ else
   ARG3=${POS[2]:-}
 fi
 [ -z "$HARNESS_ARG" ] || ARG3=$HARNESS_ARG
+
+# A ship with a remote delivery mode will eventually push or create/merge a
+# provider review request. Check that exact project's provider, configured
+# capability, CLI, and authentication before creating any worker endpoint or
+# task metadata. A read-only source remains usable for clone/fetch/sync, while
+# an attempted writable delivery is refused rather than silently downgraded.
+if [ "$KIND" = ship ] && [ "$MODE" != local-only ]; then
+  fm_forge_require_write_project "$PROJ" "$MODE" || exit 1
+fi
 
 shell_quote() {
   printf "'"

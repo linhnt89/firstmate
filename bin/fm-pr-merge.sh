@@ -37,6 +37,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-forge-capability-lib.sh
+. "$SCRIPT_DIR/fm-forge-capability-lib.sh"
 # Role partition: merging is MAIN-owned; the Pi supervision branch reports the
 # green PR and never merges (contract: bin/fm-lease-lib.sh; no-op in homes
 # without a branch actor).
@@ -130,6 +132,11 @@ if [ "$PROVIDER" = gitlab ]; then
     exit 1
   fi
 fi
+
+# A merge is a provider write, not merely a watch. Check the configured
+# capability and provider authentication before recording PR metadata or
+# invoking the provider's merge command.
+fm_forge_require_write_provider "$PROVIDER" "$FM_PR_HOST" "merge of '$URL'" || exit 1
 
 # The recorded head is read before bin/fm-pr-check.sh rewrites the metadata,
 # because that script re-records pr= and drops a pr_head= it cannot resolve.
