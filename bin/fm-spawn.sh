@@ -2226,6 +2226,16 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
+  # The initial agent-free check happens before worktree reconciliation. Repeat
+  # it at the launch boundary so an agent or other foreground owner that appears
+  # while the recorded copy is being inspected cannot be joined by a second
+  # worker. This deliberately reuses the backend's exact endpoint classifier and
+  # does not close or replace the pane on a refusal.
+  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$T")
+  [ "$RELAUNCH_STATE" = dead ] || {
+    echo "error: task $ID's endpoint changed to '$RELAUNCH_STATE' before relaunch; refusing to risk a duplicate worker" >&2
+    exit 1
+  }
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
 

@@ -146,7 +146,8 @@ The task's ordinary metadata must be absent, and the candidate must have exactly
 Before cleanup, Firstmate acquires the existing task-id spawn lock and then the shared named-session presentation lock.
 Inside both locks it takes one exact snapshot, requires one unambiguous non-target focus and the exact title, token, tab, and pane shape, positively confirms no registered agent, and reads Herdr's process information for the exact named-session pane.
 The process proof requires one recognized idle shell as both the shell process and the sole foreground process-group member, an operating-system process-table row for that shell, no child process, and a sleeping or idle shell state.
-The proof retries strict single samples for a bounded settle window because an idle interactive shell transiently hosts short-lived prompt helpers; a genuinely busy pane fails every sample.
+The proof requires consecutive strict samples with the same pane identity and shell pid.
+A leading unreadable sample may be retried for a short process-info race, but active ownership, a changed pid, a failed read after a clean sample, or any other contradictory evidence makes the result unknown.
 Any foreground command, child process, active shell job, unknown shell, unreadable process table, missing field, or API error preserves the pane.
 Firstmate immediately revalidates the same journal, metadata absence, workspace title and token uniqueness, one-tab and one-pane topology, exact pane relationship, absent agent, process proof, and non-target focus before calling the existing exact-pane focus-preserving close helper.
 It closes only that pane, never a workspace.
@@ -264,11 +265,14 @@ A restored same-labeled tab with a missing pane or no registered agent is a husk
 Create replaces only a confidently dead or no-agent husk, creates the replacement before closing the old tab, and refuses live or unknown states.
 This prevents closing the workspace's last tab before a replacement exists.
 
-The generic Herdr agent-liveness probe reuses the same classifier.
-A structurally gone pane becomes `missing`, a restored agent-less shell becomes `dead`, a registered agent becomes `alive`, and an unexpected read becomes `unreadable`.
-Unlike tmux process-name inspection, native registration can classify Pi without guessing from a generic interpreter name.
-
-The session-start sweep uses this probe.
+The generic Herdr agent-liveness probe reconciles the registered-agent result with the exact pane's process owner.
+A structurally gone pane becomes `missing`, and either a no-agent pane or a registered pane becomes `dead` only when repeated process-info samples prove the same lone recognized idle shell with no child ownership.
+A registered pane with a valid foreground agent or child process remains `alive`.
+A changing, contradictory, or unreadable process observation becomes `unreadable`, so stale registration never overrides process evidence and never licenses a duplicate relaunch.
+Unlike tmux process-name inspection, native registration still supplies the positive identity for a live Herdr agent while the process proof owns the negative recovery decision.
+`bin/fm-control.sh` treats the proven stale shell as `already-stopped`, and `bin/fm-spawn.sh --relaunch` adopts the exact recorded pane and worktree rather than closing the pane first.
+The final relaunch boundary repeats the same liveness check after worktree reconciliation and refuses if the endpoint changes.
+The session-start sweep and no-run `fm-crew-state.sh` fallback use this same probe.
 Mid-session secondmate agent-process liveness is not implemented because idle secondmates are deliberately exempt from stale-pane escalation and need a separate periodic identity signal.
 
 ## Push events and polling fallback

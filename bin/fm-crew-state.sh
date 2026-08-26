@@ -588,6 +588,27 @@ fi
 [ -n "$BACKEND_TARGET" ] || emit unknown none "no backend target recorded"
 pane_readable "$BACKEND_TARGET" || emit unknown none "backend target gone: $BACKEND_TARGET"
 
+# Herdr's cheap pane-presence read is not enough for a no-run crew: a stale
+# registration can leave a shell that still accepts lifecycle input. Reconcile
+# the same recovery-grade state used by lifecycle control and startup recovery
+# before allowing busy or status-log fallback. Other backends keep their
+# existing fallback here because they do not expose this Herdr process proof.
+if [ "$TASK_BACKEND" = herdr ]; then
+  HERDR_ENDPOINT_STATE=$(fm_backend_agent_state herdr "$BACKEND_TARGET" 2>/dev/null || printf unreadable)
+  case "$HERDR_ENDPOINT_STATE" in
+    alive) ;;
+    dead|missing)
+      emit unknown none "backend endpoint has no live agent: $BACKEND_TARGET"
+      ;;
+    ambiguous|unreadable)
+      emit unknown none "backend endpoint state is $HERDR_ENDPOINT_STATE: $BACKEND_TARGET"
+      ;;
+    *)
+      emit unknown none "backend endpoint state is unavailable: $BACKEND_TARGET"
+      ;;
+  esac
+fi
+
 # Secondmates idle on their own watcher (idle pane = healthy), so the busy
 # state is not meaningful for them; read their state from the status log only.
 # Only an exact busy verdict reports working here, and only an exact idle

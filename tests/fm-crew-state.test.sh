@@ -106,6 +106,26 @@ case "${1:-}" in
     exit 0 ;;
   pane)
     case "${2:-}" in
+      get)
+        [ "${FM_FAKE_HERDR_MISSING:-0}" = 1 ] && {
+          printf '{"error":{"code":"pane_not_found"}}\n'
+          exit 0
+        }
+        printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "${3:-w1:p1}"
+        exit 0 ;;
+      process-info)
+        pane=
+        args=("$@")
+        for ((i=0; i<${#args[@]}; i++)); do
+          [ "${args[$i]}" = --pane ] && pane=${args[$((i + 1))]:-}
+        done
+        [ -n "$pane" ] || pane=w1:p1
+        if [ "${FM_FAKE_HERDR_PROCESS:-agent}" = shell ]; then
+          printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":4242,"foreground_process_group_id":4242,"foreground_processes":[{"pid":4242,"name":"zsh","argv0":"zsh"}]}}}\n' "$pane"
+        else
+          printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":4242,"foreground_process_group_id":4242,"foreground_processes":[{"pid":4242,"name":"pi","argv0":"pi"}]}}}\n' "$pane"
+        fi
+        exit 0 ;;
       read)
         [ "${FM_FAKE_HERDR_MISSING:-0}" = 1 ] && exit 1
         if [ "${FM_FAKE_HERDR_BUSY:-0}" = 1 ]; then printf 'work in progress\nesc to interrupt\n'
@@ -169,9 +189,11 @@ reset_fakes() {
   FM_FAKE_HERDR_BUSY=0
   FM_FAKE_HERDR_MISSING=0
   FM_FAKE_HERDR_AGENT_STATUS=""
+  FM_FAKE_HERDR_PROCESS=agent
+  FM_HERDR_PS_BIN=
   FM_FAKE_CI_LOGS=""
   export FM_FAKE_AXI_STATUS FM_FAKE_AXI_STATUS_RUN FM_FAKE_RUNS_LIST FM_FAKE_BUSY FM_FAKE_BUSY_TEXT FM_FAKE_TMUX_MISSING
-  export FM_FAKE_HERDR_BUSY FM_FAKE_HERDR_MISSING FM_FAKE_HERDR_AGENT_STATUS FM_FAKE_CI_LOGS
+  export FM_FAKE_HERDR_BUSY FM_FAKE_HERDR_MISSING FM_FAKE_HERDR_AGENT_STATUS FM_FAKE_HERDR_PROCESS FM_HERDR_PS_BIN FM_FAKE_CI_LOGS
 }
 
 # --- run-object fixtures (TOON, as `no-mistakes axi status` emits) -----------
@@ -865,6 +887,39 @@ test_no_run_herdr_unknown_uses_backend_capture() {
   pass "herdr's native busy verdict reads working with no record present"
 }
 
+test_no_run_herdr_registered_bare_shell_is_not_a_current_worker() {
+  command -v jq >/dev/null 2>&1 || { pass "herdr stale-shell reconciliation skipped without jq"; return; }
+  reset_fakes
+  local d; d=$(new_case herdr-stale-shell)
+  make_repo_on_branch "$d/wt" fm/feat-herdr-stale
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-herdr-stale.meta" "window=default:w1:p5" "worktree=$d/wt" "kind=ship" \
+    "backend=herdr" "harness=claude"
+  cat > "$d/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = -axo ]; then
+  printf '4242 1\n'
+else
+  printf 'S+\n'
+fi
+SH
+  chmod +x "$d/ps"
+  FM_FAKE_AXI_STATUS=""
+  FM_FAKE_RUNS_LIST=""
+  FM_FAKE_TMUX_MISSING=1
+  FM_FAKE_HERDR_AGENT_STATUS=idle
+  FM_FAKE_HERDR_PROCESS=shell
+  FM_HERDR_PS_BIN="$d/ps"
+  export FM_FAKE_AXI_STATUS FM_FAKE_RUNS_LIST FM_FAKE_TMUX_MISSING FM_FAKE_HERDR_AGENT_STATUS FM_FAKE_HERDR_PROCESS FM_HERDR_PS_BIN
+  printf 'working: stale shell should not be treated as a worker\n' > "$d/state/feat-herdr-stale.status"
+  local out; out=$(run_crew_state "$d" feat-herdr-stale)
+  assert_contains "$out" "state: unknown" "a registered bare shell should not produce a current worker state"
+  assert_contains "$out" "no live agent" "crew-state should use the shared Herdr liveness boundary"
+  assert_not_contains "$out" "source: status-log" "a stale shell must not fall through to its old status event"
+  pass "crew-state: a registered Herdr bare shell is reconciled as a recoverable stale endpoint"
+}
+
 # Regression (2026-07 herdr false-surface incident, now solved semantically):
 # herdr's agent.get reports generation state ("working" only while the model is
 # actively streaming - docs/herdr-backend.md "Busy state"), not "this crew's
@@ -1436,6 +1491,7 @@ test_no_run_busy_pane
 test_no_run_footer_text_alone_is_not_working
 test_no_run_grok_uses_isolated_fallback
 test_no_run_herdr_unknown_uses_backend_capture
+test_no_run_herdr_registered_bare_shell_is_not_a_current_worker
 test_no_run_herdr_idle_agent_status_outranked_by_record
 test_no_run_herdr_idle_agent_status_and_idle_record_stays_idle
 test_no_run_idle_pane_uses_log

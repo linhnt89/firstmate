@@ -113,37 +113,34 @@ case "$OUT" in
 esac
 pass "real herdr: interrupt refuses when herdr's own agent registry reports no agent"
 
-# --- a registered agent: classification flips, and the verbs follow ---------
+# --- stale registration on a surviving shell: recovery classification --------
 
 herdr pane report-agent "$PANE_ID" --source fm-control-smoke --agent fm-control-smoke-agent \
   --state idle --session "$SESSION" >/dev/null 2>&1 \
-  || fail "could not register a live agent on the task pane"
+  || fail "could not register the stale-agent simulation on the task pane"
 
 STATE=$(fm_backend_agent_state herdr "$SESSION:$PANE_ID")
-[ "$STATE" = alive ] || fail "herdr should classify a registered agent as alive, got '$STATE'"
+[ "$STATE" = dead ] || fail "herdr should classify a registered bare shell as dead after process reconciliation, got '$STATE'"
+pass "real herdr: stale registration does not override the exact lone-idle-shell proof"
 
-OUT=$(run_control hsmoke interrupt) || fail "interrupt against a registered agent should succeed: $OUT"
+if OUT=$(run_control hsmoke interrupt 2>&1); then
+  fail "interrupt should refuse after the registered agent is proven gone: $OUT"
+fi
 case "$OUT" in
-  *"interrupt-delivered hsmoke harness=claude backend=herdr verified=agent-alive cancel=unconfirmed"*) : ;;
-  *) fail "interrupt should report the agent-alive proof on herdr, got: $OUT" ;;
+  *"nothing to interrupt"*) : ;;
+  *) fail "the interrupt refusal should name the already-stopped agent, got: $OUT" ;;
 esac
-pass "real herdr: interrupt delivers the harness's key and proves the agent survived it"
+pass "real herdr: lifecycle control refuses to send agent input to the surviving shell"
+
+OUT=$(run_control hsmoke exit) || fail "exit on the proven stale shell should be idempotent success: $OUT"
+case "$OUT" in
+  "already-stopped hsmoke"*) : ;;
+  *) fail "stale-shell exit should report already-stopped, got: $OUT" ;;
+esac
 
 herdr pane get "$PANE_ID" --session "$SESSION" >/dev/null 2>&1 \
   || fail "the control plane must never remove the endpoint it was operating on"
 [ -d "$WT" ] || fail "the control plane must never remove the task's local copy"
-pass "real herdr: no control verb removed the endpoint or the task's local copy"
-
-# Last, because it deliberately types a harness command into a pane that hosts
-# a plain shell: the registered agent cannot actually be stopped that way, and
-# the control plane must say so rather than report a stop it did not achieve.
-if OUT=$(run_control hsmoke exit 2>&1); then
-  fail "exit should fail closed when the agent does not stop: $OUT"
-fi
-case "$OUT" in
-  *"did not stop"*) : ;;
-  *) fail "the exit failure should say the agent did not stop, got: $OUT" ;;
-esac
-pass "real herdr: an agent that does not stop fails closed instead of being reported as stopped"
+pass "real herdr: stale-shell lifecycle recovery preserves the exact endpoint and local copy"
 
 fm_backend_herdr_kill "$SESSION:$PANE_ID" 2>/dev/null || true
