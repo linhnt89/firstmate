@@ -256,6 +256,8 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-forge-capability-lib.sh
+. "$SCRIPT_DIR/fm-forge-capability-lib.sh"
 # shellcheck source=bin/fm-trace-context-lib.sh
 . "$SCRIPT_DIR/fm-trace-context-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh
@@ -1656,6 +1658,7 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
+
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
 delivery_rigor_rank() {  # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task mode
@@ -1690,6 +1693,15 @@ if [ "$KIND" = ship ]; then
      && [ "$(delivery_rigor_rank "$MODE")" -lt "$(delivery_rigor_rank "$STANDING_MODE")" ]; then
     echo "notice: $ID ships mode=$MODE while the standing posture for $PROJ_NAME is $STANDING_MODE - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state" >&2
   fi
+fi
+
+# A ship with a remote delivery mode will eventually push or create/merge a
+# provider review request. Check that exact project's provider, configured
+# capability, CLI, and authentication before creating any worker endpoint or
+# task metadata. A read-only source remains usable for clone/fetch/sync, while
+# an attempted writable delivery is refused rather than silently downgraded.
+if [ "$KIND" = ship ] && [ "$MODE" != local-only ]; then
+  fm_forge_require_write_project "$PROJ_ABS" "$MODE" || exit 1
 fi
 
 BRIEF_DIR_REAL=$(cd "$(dirname "$BRIEF")" && pwd -P)

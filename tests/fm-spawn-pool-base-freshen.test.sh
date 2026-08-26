@@ -30,12 +30,12 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
-  fm_fake_exit0 "$fakebin" treehouse
+  fm_fake_exit0 "$fakebin" treehouse gh-axi gh
   printf '%s\n' "$fakebin"
 }
 
 make_case() {
-  local name=$1 id=$2 default=${3:-main} case_dir home project origin pool publisher fakebin initial
+  local name=$1 id=$2 default=${3:-main} case_dir home project origin pool publisher fakebin initial origin_url
   case_dir="$TMP_ROOT/$name"
   home="$case_dir/home"
   project="$case_dir/project"
@@ -55,6 +55,11 @@ make_case() {
   git -C "$project" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
   git clone --quiet --bare "$project" "$origin"
   git -C "$project" remote add origin "file://$origin"
+  # Preserve the local bare transport for base refreshes while exposing a
+  # canonical GitHub origin to the remote-delivery capability guard.
+  origin_url="https://github.com/example/$name.git"
+  git -C "$project" remote set-url origin "$origin_url"
+  git -C "$project" config url."file://$origin".insteadOf "$origin_url"
   initial=$(git -C "$project" rev-parse HEAD)
   git -C "$project" worktree add --quiet --detach "$pool" "$initial"
 
@@ -142,7 +147,11 @@ test_unreachable_origin_refuses_stale_pool_base() {
   id='pool-unreachable-origin-r2'
   rec=$(make_case unreachable-origin "$id")
   read_case_record "$rec"
-  git -C "$POOL_DIR" remote set-url origin "file://$CASE_DIR/missing-origin.git"
+  # Keep the provider guard satisfied through the project's canonical GitHub
+  # origin, while making this pooled worktree's fetch rewrite to a missing local
+  # repository so the base-freshness refusal remains the assertion under test.
+  git -C "$POOL_DIR" remote set-url origin https://github.com/example/unreachable-origin-missing.git
+  git -C "$POOL_DIR" config url."file://$CASE_DIR/missing-origin.git".insteadOf https://github.com/example/unreachable-origin-missing.git
   before=$(git -C "$POOL_DIR" rev-parse HEAD)
 
   out=$(run_spawn "$id" --mode no-mistakes --yolo off)

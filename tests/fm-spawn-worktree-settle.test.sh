@@ -89,7 +89,7 @@ EOF
 }
 
 run_settle_spawn() {
-  local id=$1
+  local id=$1 mode=${2:-no-mistakes}
   FM_ROOT_OVERRIDE='' FM_HOME="$HOME_DIR" \
     FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_PROJECTS_OVERRIDE="$HOME_DIR/projects" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
@@ -97,7 +97,7 @@ run_settle_spawn() {
     FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_PANE_STALE="$STALE_DIR" \
     FM_FAKE_PANE_STALE_READS="$STALE_READS" FM_FAKE_PANE_COUNTFILE="$COUNTFILE" \
     PATH="$FAKEBIN_DIR:$PATH" \
-    "$SPAWN" "$id" "$PROJ_DIR" --mode no-mistakes --yolo off 2>&1
+    "$SPAWN" "$id" "$PROJ_DIR" --mode "$mode" --yolo off 2>&1
 }
 
 # A single stale first read (the exact incident) must not be accepted: the
@@ -109,7 +109,7 @@ test_single_stale_first_read_is_not_accepted() {
   rec=$(make_settle_case settle-single "$id" 1)
   read_settle_record "$rec"
 
-  out=$(run_settle_spawn "$id")
+  out=$(run_settle_spawn "$id" local-only)
   status=$?
   expect_code 0 "$status" "spawn should succeed once the pane settles"
   assert_contains "$out" "spawned $id" "spawn did not report success"
@@ -123,6 +123,54 @@ test_single_stale_first_read_is_not_accepted() {
 # A pane that reports the real worktree from the very first read still only
 # costs the loop's existing one-second inter-poll sleep to confirm - not an
 # extra full cycle on top of that.
+test_read_only_forge_refuses_remote_delivery_before_endpoint_creation() {
+  local rec id out status
+  id=settle-read-only-forge-z3
+  rec=$(make_settle_case settle-read-only-forge "$id" 0)
+  read_settle_record "$rec"
+  printf '%s\n' 'github.com github read-only' > "$HOME_DIR/config/forge-capabilities"
+  git -C "$PROJ_DIR" remote set-url origin https://github.com/example/repo.git
+
+  set +e
+  out=$(run_settle_spawn "$id")
+  status=$?
+  set -e
+  [ "$status" -ne 0 ] || fail "spawn succeeded despite a read-only GitHub capability"
+  assert_contains "$out" "configured read-only" \
+    "read-only forge refusal did not name the unavailable capability"
+  assert_absent "$HOME_DIR/state/$id.meta" \
+    "read-only forge refusal created task metadata before endpoint creation"
+  pass "remote delivery refuses a read-only forge capability before creating an endpoint"
+}
+
+test_non_forge_origin_refuses_remote_delivery_before_endpoint_creation() {
+  local scheme case_dir rec id out status local_origin
+  for scheme in file absolute; do
+    id="settle-$scheme-origin-z4"
+    rec=$(make_settle_case "settle-$scheme-origin" "$id" 0)
+    read_settle_record "$rec"
+    case_dir=${rec%%|*}
+    local_origin="$case_dir/local-origin.git"
+    git init -q --bare "$local_origin"
+    if [ "$scheme" = file ]; then
+      git -C "$PROJ_DIR" remote set-url origin "file://$local_origin"
+    else
+      git -C "$PROJ_DIR" remote set-url origin "$local_origin"
+    fi
+
+    set +e
+    out=$(run_settle_spawn "$id")
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "$scheme origin unexpectedly allowed remote delivery"
+    assert_contains "$out" "origin has no supported forge host" \
+      "$scheme origin refusal did not identify the non-forge origin"
+    assert_absent "$HOME_DIR/state/$id.meta" \
+      "$scheme origin refusal created task metadata before endpoint creation"
+  done
+  pass "remote delivery refuses file and absolute-path origins before creating an endpoint"
+}
+
 test_already_settled_pane_costs_one_confirm_sleep() {
   local rec id out status start end elapsed
   id=settle-already-settled-z2
@@ -130,7 +178,7 @@ test_already_settled_pane_costs_one_confirm_sleep() {
   read_settle_record "$rec"
 
   start=$(date +%s)
-  out=$(run_settle_spawn "$id")
+  out=$(run_settle_spawn "$id" local-only)
   status=$?
   end=$(date +%s)
   elapsed=$((end - start))
@@ -143,5 +191,7 @@ test_already_settled_pane_costs_one_confirm_sleep() {
 
 test_single_stale_first_read_is_not_accepted
 test_already_settled_pane_costs_one_confirm_sleep
+test_read_only_forge_refuses_remote_delivery_before_endpoint_creation
+test_non_forge_origin_refuses_remote_delivery_before_endpoint_creation
 
 echo "# all fm-spawn-worktree-settle tests passed"

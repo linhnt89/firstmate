@@ -1430,6 +1430,25 @@ EOF
 
 # --- deferred network stage -------------------------------------------------
 
+# add_slow_github_project adds a writable GitHub origin so the deferred auth
+# probe has a provider-scoped target without making the fleet refresh contact it.
+add_slow_github_project() {
+  local home=$1 fakebin=$2 project real_git
+  project="$home/projects/github-source"
+  mkdir -p "$home/projects"
+  git init -q "$project"
+  git -C "$project" remote add origin https://github.com/example/source.git
+  real_git=$(command -v git)
+  cat > "$fakebin/git" <<SH
+#!/usr/bin/env bash
+case " \$* " in
+  *' fetch '*) exit 0 ;;
+esac
+exec '$real_git' "\$@"
+SH
+  chmod +x "$fakebin/git"
+}
+
 # install_slow_gh <fakebin> <seconds>: one external-network call the digest used
 # to make directly. Making it pathologically slow is how a test stands in for an
 # unreachable host without touching one: if any part of the blocking path still
@@ -1459,6 +1478,7 @@ test_unreachable_network_never_blocks_the_digest() {
 $rec
 EOF
   network_finished="${root%/root}/network-finished"
+  add_slow_github_project "$home" "$fakebin"
   install_slow_gh "$fakebin" 12 "$network_finished"
 
   started=$(date +%s)
@@ -1470,16 +1490,16 @@ EOF
   assert_contains "$out" "SESSION START" "the digest did not complete"
   assert_contains "$out" "IN PROGRESS - the deferred network checks have not finished yet." \
     "the digest did not disclose that its network checks were still running"
-  assert_contains "$out" "NOT yet confirmed: GitHub authentication, dead-secondmate relaunch" \
+  assert_contains "$out" "NOT yet confirmed: forge authentication, dead-secondmate relaunch" \
     "the digest did not name the checks it has not confirmed"
   assert_not_contains "$out" "NEEDS_GH_AUTH" \
-    "the digest reported a GitHub-auth verdict it could not yet have"
+    "the digest reported a provider-auth verdict it could not yet have"
 
   # ... and the work itself still happens, off the blocking path.
   wait_for_network_stage "$home" "$root" 60 \
     || fail "the deferred stage never finished: $(network_stage_report "$home" "$root")"
   assert_contains "$(network_stage_report "$home" "$root")" "NEEDS_GH_AUTH" \
-    "the deferred stage lost the GitHub-auth verdict it was deferring"
+    "the deferred stage lost the provider-auth verdict it was deferring"
   assert_contains "$(cat "$log")" "new-window" \
     "the deferred stage lost the dead-secondmate relaunch"
   pass "session start: an unreachable host delays a reported check, not the digest"
@@ -1495,6 +1515,7 @@ test_deferred_result_reaches_the_agent_when_the_digest_cannot_print_it() {
   IFS='|' read -r root home fakebin mate log spawned <<EOF
 $rec
 EOF
+  add_slow_github_project "$home" "$fakebin"
   install_slow_gh "$fakebin" 8
   queue="$home/state/.wake-queue"
 
@@ -1507,7 +1528,7 @@ EOF
 }
 
 # A read-only session has no lock, so it neither owns the mutating sweeps nor has
-# any action a GitHub-auth verdict would gate. It must say that plainly instead of
+# any action a provider-auth verdict would gate. It must say that plainly instead of
 # quietly dropping the checks.
 test_read_only_session_declares_skipped_network_checks() {
   local rec root home fakebin out
@@ -1532,7 +1553,7 @@ SH
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
 
   assert_contains "$out" "READ-ONLY SESSION" "the read-only fixture did not actually refuse the lock"
-  assert_contains "$out" "skipped (read-only session) - GitHub authentication" \
+  assert_contains "$out" "skipped (read-only session) - provider authentication" \
     "a read-only session did not declare its skipped network checks"
   assert_absent "$home/state/.startup-network.status" \
     "a read-only session started the deferred stage it has no authority for"
