@@ -138,7 +138,7 @@ Both recorded runtime identities now classify the exact `pi-launcher` foreground
 
 Backend applicability was reviewed across every spawn adapter.
 Tmux needs the exact `pi-launcher`, `pi-signed`, `pi`, and `Pi` process identities for recovery-grade liveness.
-Herdr combines native registration with repeated exact-pane process proof, so stale registration on a lone idle shell is dead while only one positively attributed foreground harness process is alive; shell-owned children, helpers, multi-process activity, changing evidence, and unreadable evidence remain non-recoverable.
+Herdr combines native registration with repeated exact-pane process proof, so stale registration on a lone idle shell is dead while only one positively attributed foreground harness process is alive; shell-owned children, helpers, arbitrary interpreter argument paths, multi-process activity, changing evidence, and unreadable evidence remain non-recoverable.
 Zellij has no verified recovery-grade agent process probe, while Orca and cmux do not support secondmate spawns, so those three retain their existing generic ordinary-launch semantics without a new liveness matcher.
 
 The current classifier matrix and its refresh guard are recorded in [Composer classification matrix](#composer-classification-matrix), with portable shape coverage in `tests/fm-composer-lib.test.sh` and `tests/fm-composer-ghost.test.sh`.
@@ -620,11 +620,13 @@ ok - real herdr: lifecycle control refuses to send agent input to the surviving 
 ok - real herdr: stale-shell lifecycle recovery preserves the exact endpoint and local copy
 ok - real herdr: shell-owned helper activity is not promoted to a live agent
 ok - real herdr: lifecycle control sends no input to an ambiguous shell-owned helper
+ok - real herdr: arbitrary interpreter argument paths do not create positive attribution
+ok - real herdr: lifecycle control sends no input to arbitrary interpreter argument paths
 ```
 
 The registry read through `herdr pane report-agent` is one input to `fm_backend_herdr_agent_state`, but it cannot override the exact process proof.
 The 2026-08-26 real run also registered an idle agent on a plain Herdr shell and observed `dead`, then verified that lifecycle control reported `already-stopped` without sending agent input.
-Portable `tests/fm-secondmate-liveness.test.sh` covers live foreground agents, lone idle shells, shell-owned child/helper refusal, repeated samples, changed pids, contradictory pane identity, and unreadable evidence.
+Portable `tests/fm-secondmate-liveness.test.sh` covers live foreground agents, lone idle shells, shell-owned child/helper refusal, arbitrary Python/Node argument paths, repeated samples, changed pids, contradictory pane identity, and unreadable evidence.
 `tests/fm-crew-state.test.sh` covers no-run reconciliation, and `tests/fm-control-relaunch.test.sh` covers exact-endpoint in-place relaunch and task-lock contention.
 Run these commands after every Herdr upgrade rather than trusting the version above:
 

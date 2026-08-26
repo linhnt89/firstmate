@@ -1184,9 +1184,11 @@ fm_backend_herdr_pid_is_bare_shell() {  # <ps-bin> <pid>
 # registered Herdr pane is not enough by itself: a stale registration can sit
 # above a shell, helper, or unrelated foreground process. Exact path components
 # cover versioned installs; the basename rules cover stable launchers, and
-# Cursor's structural matcher handles its bundled node process.
-fm_backend_herdr_process_is_agent() {  # <name> <argv0> <argv-text>
-  local name=$1 argv0=$2 argv=${3:-} value harness base value_base
+# Cursor's structural matcher handles its bundled node process. Deliberately do
+# not inspect arbitrary argument text: a user-supplied `/tmp/claude/...` or
+# `/tmp/codex/...` argument is not executable identity.
+fm_backend_herdr_process_is_agent() {  # <name> <argv0>
+  local name=$1 argv0=$2 value harness base value_base
   base=${name##*/}
   base=${base#-}
   case "$base" in
@@ -1194,7 +1196,7 @@ fm_backend_herdr_process_is_agent() {  # <name> <argv0> <argv-text>
       return 0
       ;;
   esac
-  for value in "$name" "$argv0" "$argv"; do
+  for value in "$name" "$argv0"; do
     value_base=${value##*/}
     value_base=${value_base#-}
     case "$value_base" in
@@ -1209,7 +1211,7 @@ fm_backend_herdr_process_is_agent() {  # <name> <argv0> <argv-text>
       */muse/*) return 0 ;;
     esac
   done
-  fm_cursor_process_matches "$name" "$argv" "$argv0"
+  fm_cursor_process_matches "$name" "" "$argv0"
 }
 
 # fm_backend_herdr_pane_process_observation: one strict observation of the
@@ -1225,7 +1227,7 @@ fm_backend_herdr_process_is_agent() {  # <name> <argv0> <argv-text>
 # process is never treated as dead.
 fm_backend_herdr_pane_process_observation() {  # <session> <pane-id>
   local session=$1 pane=$2 info shell_pid foreground_pgid count process_pid
-  local name argv0 process_args shell_name rows stat ps_bin table_state
+  local name argv0 shell_name rows stat ps_bin table_state
   info=$(fm_backend_herdr_cli "$session" pane process-info --pane "$pane" 2>/dev/null) || {
     printf 'unknown'
     return 0
@@ -1278,11 +1280,7 @@ fm_backend_herdr_pane_process_observation() {  # <session> <pane-id>
     printf 'unknown'
     return 0
   }
-  process_args=$(printf '%s' "$info" | jq -r '
-    .result.process_info.foreground_processes[0].argv
-    | if type == "array" then map(select(type == "string")) | join(" ") else "" end
-  ' 2>/dev/null) || process_args=
-  if fm_backend_herdr_process_is_agent "$name" "$argv0" "$process_args"; then
+  if fm_backend_herdr_process_is_agent "$name" "$argv0"; then
     printf 'agent'
     return 0
   fi

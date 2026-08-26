@@ -183,10 +183,12 @@ test_herdr_positive_process_attribution_covers_supported_harnesses() {
   bash -c '
     . "$0/bin/backends/herdr.sh"
     for name in claude codex opencode grok kimi pi pi-signed pi-launcher muse muse-bin-2026; do
-      fm_backend_herdr_process_is_agent "$name" "$name" "" || exit 1
+      fm_backend_herdr_process_is_agent "$name" "$name" || exit 1
     done
-    fm_backend_herdr_process_is_agent node "/home/crew/.local/share/cursor-agent/versions/v/agent" ""
-    fm_backend_herdr_process_is_agent node "/home/crew/.local/bin/muse-bin-2026" ""
+    fm_backend_herdr_process_is_agent node "/home/crew/.local/share/cursor-agent/versions/v/agent"
+    fm_backend_herdr_process_is_agent node "/home/crew/.local/bin/muse-bin-2026"
+    ! fm_backend_herdr_process_is_agent node node
+    ! fm_backend_herdr_process_is_agent python3 python3
   ' "$ROOT" || fail "a supported Herdr harness process identity must remain positively attributable"
   pass "Herdr liveness: supported harness and Cursor process identities are positively attributed"
 }
@@ -276,6 +278,16 @@ test_herdr_agent_state_reconciles_registration_with_repeated_process_proof() {
   out=$(run_herdr_process_state "$dir")
   [ "$out" = unreadable ] || fail "an unrecognized foreground helper must refuse lifecycle recovery, got '$out'"
   pass "Herdr liveness: unrecognized foreground activity stays unreadable"
+
+  for interpreter in python3 node; do
+    dir="$TMP_ROOT/herdr-process-arg-$interpreter"; mkdir -p "$dir/info"; : > "$dir/info.count"
+    make_herdr_process_ps "$dir"
+    printf '4242 1\n' > "$dir/ps.rows"
+    herdr_process_info "$dir/info/1.json" 4242 4242 "{\"pid\":4242,\"name\":\"$interpreter\",\"argv0\":\"$interpreter\",\"argv\":[\"$interpreter\",\"-c\",\"sleep\",\"/tmp/claude/input.py\",\"/tmp/codex/data\"]}"
+    out=$(run_herdr_process_state "$dir")
+    [ "$out" = unreadable ] || fail "an arbitrary $interpreter argument path must not become agent identity, got '$out'"
+  done
+  pass "Herdr liveness: arbitrary Python/Node argument paths do not create positive attribution"
 
   dir="$TMP_ROOT/herdr-process-changing"; mkdir -p "$dir/info"; : > "$dir/info.count"
   make_herdr_process_ps "$dir"

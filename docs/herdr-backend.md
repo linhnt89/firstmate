@@ -268,9 +268,9 @@ This prevents closing the workspace's last tab before a replacement exists.
 The generic Herdr agent-liveness probe reconciles the registered-agent result with the exact pane's process owner.
 A structurally gone pane becomes `missing`, and either a no-agent pane or a registered pane becomes `dead` only when repeated process-info samples prove the same lone recognized idle shell with no child ownership.
 A registered pane is `alive` only when one foreground process is positively attributed to a verified worker harness.
-A shell-owned child, helper, multi-process foreground group, or other unattributed activity is `unreadable`, not live-agent evidence, so lifecycle control cannot send agent-specific input into it.
+A shell-owned child, helper, multi-process foreground group, arbitrary interpreter argument, or other unattributed activity is `unreadable`, not live-agent evidence, so lifecycle control cannot send agent-specific input into it.
 A changing, contradictory, or unreadable process observation also becomes `unreadable`, so stale registration never overrides process evidence and never licenses a duplicate relaunch.
-Native registration supplies the required pane identity, while exact process attribution supplies the positive live-agent proof and the repeated process proof owns the negative recovery decision.
+Native registration supplies the required pane identity, while exact structured executable attribution (process name or argv0, including Cursor's verified install path) supplies the positive live-agent proof and the repeated process proof owns the negative recovery decision.
 `bin/fm-control.sh` treats the proven stale shell as `already-stopped`, and `bin/fm-spawn.sh --relaunch` adopts the exact recorded pane and worktree rather than closing the pane first.
 The final relaunch boundary repeats the same liveness check after worktree reconciliation and refuses if the endpoint changes.
 The session-start sweep and no-run `fm-crew-state.sh` fallback use this same probe.
