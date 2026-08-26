@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Tests for bin/fm-review-diff.sh: when a task has an open PR recorded in meta,
-# the review diff must compare the authoritative base against a freshly fetched
-# PR head, not a stale local branch or a stale recorded pr_head= left behind
-# after no-mistakes fix rounds push to the PR.
+# Tests for bin/fm-review-diff.sh: when a task has an open provider review
+# request recorded in meta, the review diff must compare the authoritative base
+# against a freshly fetched request head, not a stale local branch or a stale
+# recorded pr_head= left behind after no-mistakes fix rounds push to the request.
 #
 # Matrix:
 #   (a) pr= + reachable pr_head=, no remote pull ref -> offline fallback to recorded SHA
-#   (b) pr= without pr_head= -> fetch refs/pull/<n>/head and diff that
+#   (b) pr= without pr_head= -> fetch the provider review head and diff that
 #   (c) pr= absent -> unchanged worktree-branch diff
 #   (d) pr= present but PR head unreachable -> fallback to local branch + warning
 #   (e) pr= + STALE recorded pr_head= + newer remote pull head -> must use fetched head
@@ -93,6 +93,24 @@ test_pr_meta_uses_pr_head_not_stale_local() {
   pass "fm-review-diff falls back to recorded pr_head when pull head cannot be fetched"
 }
 
+test_gitlab_mr_head_uses_merge_request_ref() {
+  local case_dir out
+  case_dir=$(make_case gitlab-mr-head)
+  stale_and_pr_commits "$case_dir"
+  git -C "$case_dir/wt" push -q origin "pr-head-tmp:refs/merge-requests/7/head"
+  write_task_meta "$case_dir" \
+    "pr=https://forge.example/group/subgroup/project/-/merge_requests/7"
+
+  out=$(run_review_diff "$case_dir" task-x1 2> "$case_dir/stderr")
+
+  assert_contains "$out" '+pr-fixed' "gitlab-mr-head: diff should use the fetched merge request head"
+  assert_not_contains "$out" 'stale-local' \
+    "gitlab-mr-head: diff must not use the stale local branch"
+  assert_not_contains "$(cat "$case_dir/stderr")" 'warning: review request head unavailable' \
+    "gitlab-mr-head: should not warn when the merge request ref is present"
+  pass "fm-review-diff fetches a GitLab merge request head from its provider ref"
+}
+
 test_stale_recorded_pr_head_loses_to_fetched_pull_head() {
   local case_dir out stale_sha
   case_dir=$(make_case stale-recorded)
@@ -162,7 +180,7 @@ test_unreachable_pr_head_falls_back_with_warning() {
   set -e
   err=$(cat "$case_dir/stderr")
 
-  assert_contains "$err" 'warning: PR head unavailable; diff may lag the open PR' \
+  assert_contains "$err" 'warning: review request head unavailable; diff may lag the open request' \
     "fetch-fallback: must warn when PR head cannot be resolved"
   assert_contains "$out" '+stale-local' "fetch-fallback: should fall back to the local branch diff"
   assert_not_contains "$out" '+pr-fixed' "fetch-fallback: must not invent a PR head diff offline"
@@ -170,6 +188,7 @@ test_unreachable_pr_head_falls_back_with_warning() {
 }
 
 test_pr_meta_uses_pr_head_not_stale_local
+test_gitlab_mr_head_uses_merge_request_ref
 test_pr_meta_fetches_pull_head_without_recorded_sha
 test_stale_recorded_pr_head_loses_to_fetched_pull_head
 test_no_pr_meta_uses_local_branch

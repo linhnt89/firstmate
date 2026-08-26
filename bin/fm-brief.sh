@@ -30,8 +30,8 @@
 # For ship tasks, --mode is REQUIRED and shapes the definition of done. Firstmate
 # resolves it per task at intake (AGENTS.md section 7); data/projects.md holds the
 # captain's standing posture as context, and this script never reads it:
-#   no-mistakes  implement -> /no-mistakes pipeline -> PR -> configured merge authority
-#   direct-PR    implement -> push + open PR via gh-axi (no pipeline) -> configured merge authority
+#   no-mistakes  implement -> /no-mistakes pipeline -> provider review request -> configured merge authority
+#   direct-PR    implement -> push + open provider review request (gh-axi for GitHub, glab for GitLab) -> configured merge authority
 #   local-only   implement on branch, stop and report "ready in branch" (no push/PR);
 #                the configured merge authority approves, firstmate merges to local main
 # no-mistakes-prod-only is a registry policy, not a task mode; resolve it to one of
@@ -381,9 +381,11 @@ case "$MODE" in
     IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
 Delivery contract: mode=direct-PR
-This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
+This task ships **direct-PR**: you raise the provider review request yourself, without the no-mistakes pipeline.
 The task is complete only when committed on your branch.
-When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
+Determine the provider from the project's origin before delivery.
+For GitHub, push the branch and open a pull request with \`gh-axi\`; for GitLab, push the branch and open a merge request with \`glab\`.
+Then append \`done: PR {url}\` to the status file and stop.
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; firstmate relays the outcome.
 EOF
     ;;

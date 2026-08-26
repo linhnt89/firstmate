@@ -7,6 +7,8 @@
 #          Silent = all good.
 #          Lines: "MISSING: <tool> (install: <command>)",
 #                 "MISSING_MANUAL: <tool> (instructions: <url>)", "NEEDS_GH_AUTH",
+#                 "NEEDS_GITLAB_AUTH: host=<host> (run glab auth login --hostname <host>)",
+#                 "FORGE_CAPABILITY: <diagnostic>",
 #                 "BACKEND_INVALID: <name> (known: <names>)",
 #                 "STARTUP_MEMORY_BUDGET: invalid config/startup-memory-budget - <reason>",
 #                 "CREW_DISPATCH: invalid config/crew-dispatch.json - <reason>",
@@ -98,13 +100,13 @@
 #                 step. Unrecognized values fall back here on purpose: a typo
 #                 must never silently skip a safety sweep.
 #            skip - every LOCAL step, and none of the network ones. Skips
-#                 `gh auth status`, secondmate_liveness_sweep, secondmate_sync,
+#                 provider auth status, secondmate_liveness_sweep, secondmate_sync,
 #                 secondmate_handoff_resume, and fleet_sync.
 #            only - ONLY those network steps and nothing else. No tool detection,
 #                 no version floors, no tangle check, no PR-check migration, no
 #                 x_mode_setup: those already ran on the local pass.
 #          FM_BOOTSTRAP_DETECT_ONLY composes with it unchanged, so `only` plus
-#          detect-only is the read-only `gh auth status` probe on its own.
+#          detect-only is the read-only provider-auth probe on its own.
 #          bin/fm-startup-network.sh owns the deferral: it runs the `only` phase
 #          in a detached bounded worker and publishes the result. This file stays
 #          the single owner of every sweep, and the split changes only WHEN each
@@ -156,6 +158,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-x-lib.sh"
 # shellcheck source=bin/fm-backend.sh disable=SC1091
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-forge-capability-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-forge-capability-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
 # fm-timing-lib.sh is inert unless FM_TIMING_LOG names a file, which only the
@@ -832,7 +836,7 @@ secondmate_handoff_detect() {
 
 install_cmd() {
   case "$1" in
-    tmux|node|git|gh|curl|jq|orca|zellij) echo "brew install $1  # or the platform's package manager" ;;
+    tmux|node|git|gh|glab|curl|jq|orca|zellij) echo "brew install $1  # or the platform's package manager" ;;
     cmux) echo "brew install --cask cmux  # or see https://cmux.com" ;;
     treehouse) echo "curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh" ;;
     no-mistakes) echo "curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh" ;;
@@ -864,7 +868,7 @@ missing_tool_diagnostic() {
 # fm_backend_required_tools (bin/fm-backend.sh). So a herdr/zellij/cmux home is
 # never told tmux is missing, and only orca drops treehouse. A backend value with
 # no verified dependency set is reported before the universal checks continue.
-COMMON_TOOLS="node git gh no-mistakes gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi"
+COMMON_TOOLS="node git no-mistakes chrome-devtools-axi lavish-axi tasks-axi quota-axi"
 BACKEND=$(fm_backend_name)
 BACKEND_VALID=1
 if ! BACKEND_TOOLS=$(fm_backend_required_tools "$BACKEND"); then
@@ -873,6 +877,9 @@ if ! BACKEND_TOOLS=$(fm_backend_required_tools "$BACKEND"); then
 fi
 TOOLS="$BACKEND_TOOLS $COMMON_TOOLS"
 NO_MISTAKES_MIN=1.31.2
+# no-mistakes v1.32.0 added self-hosted GitLab provider detection, so a GitLab
+# project using the validation pipeline needs that provider-aware floor.
+NO_MISTAKES_GITLAB_MIN=1.32.0
 # AXI-FAMILY FLOOR POLICY. Every axi-family floor is the CURRENT LATEST published
 # version of that tool, captain-bumped periodically to keep the whole fleet on the
 # newest axi tools. It is NOT the minimum feature-introduced version. These floors
@@ -1205,7 +1212,55 @@ fi
 
 # Local detection: presence, version floors, and configuration. Nothing here
 # leaves this machine, so it stays on the session-start critical path.
+forge_tool_seen() {
+  local tool=$1
+  case " ${FM_FORGE_TOOLS_SEEN:-} " in
+    *" $tool "*) return 0 ;;
+  esac
+  FM_FORGE_TOOLS_SEEN="${FM_FORGE_TOOLS_SEEN:-} $tool"
+  return 1
+}
+
+forge_tool_check() {
+  local tool=$1
+  forge_tool_seen "$tool" && return 0
+  command -v "$tool" >/dev/null || missing_tool_diagnostic "$tool"
+}
+
+forge_local_requirements() {
+  local provider host capability project mode
+  FM_FORGE_TOOLS_SEEN=
+  FM_FORGE_GITLAB_PIPELINE_REQUIRED=0
+  if ! fm_forge_capability_validate; then
+    echo "FORGE_CAPABILITY: invalid config/forge-capabilities - $FM_FORGE_CAPABILITY_ERROR"
+    return 0
+  fi
+  while IFS='|' read -r provider host capability project mode; do
+    [ -n "$project" ] || continue
+    case "$provider:$capability" in
+      unknown:*)
+        echo "FORGE_CAPABILITY: project $project needs a provider mapping for host ${host:-unknown}; add '<host> <github|gitlab> <read-only|read-write>' to config/forge-capabilities"
+        ;;
+      github:read-write)
+        forge_tool_check gh
+        forge_tool_check gh-axi
+        if command -v gh-axi >/dev/null 2>&1 && ! tool_version_at_least gh-axi "$GH_AXI_MIN"; then
+          echo "MISSING: gh-axi (install: $(install_cmd gh-axi))"
+        fi
+        ;;
+      gitlab:read-write)
+        forge_tool_check glab
+        forge_tool_check jq
+        case "$mode" in
+          no-mistakes|no-mistakes-prod-only) FM_FORGE_GITLAB_PIPELINE_REQUIRED=1 ;;
+        esac
+        ;;
+    esac
+  done < <(fm_forge_required_targets "$PROJECTS")
+}
+
 detect_local_tools() {
+  local no_mistakes_min
   if [ "$BACKEND_VALID" -eq 0 ]; then
     echo "BACKEND_INVALID: $BACKEND (known: $FM_BACKEND_KNOWN)"
   fi
@@ -1216,6 +1271,7 @@ detect_local_tools() {
   for t in $COMMON_TOOLS; do
     command -v "$t" >/dev/null || missing_tool_diagnostic "$t"
   done
+  forge_local_requirements
   # The treehouse lease-support upgrade check is only relevant when the resolved
   # backend actually requires treehouse (every backend except orca, which owns its
   # own worktrees); an orca home must not be told to upgrade a provider it never uses.
@@ -1223,11 +1279,12 @@ detect_local_tools() {
     && command -v treehouse >/dev/null 2>&1 && ! treehouse_supports_lease; then
     echo "MISSING: treehouse (install: $(install_cmd treehouse))"
   fi
-  if command -v no-mistakes >/dev/null 2>&1 && ! tool_version_at_least no-mistakes "$NO_MISTAKES_MIN"; then
-    echo "MISSING: no-mistakes (install: $(install_cmd no-mistakes))"
+  no_mistakes_min=$NO_MISTAKES_MIN
+  if [ "${FM_FORGE_GITLAB_PIPELINE_REQUIRED:-0}" = 1 ]; then
+    no_mistakes_min=$NO_MISTAKES_GITLAB_MIN
   fi
-  if command -v gh-axi >/dev/null 2>&1 && ! tool_version_at_least gh-axi "$GH_AXI_MIN"; then
-    echo "MISSING: gh-axi (install: $(install_cmd gh-axi))"
+  if command -v no-mistakes >/dev/null 2>&1 && ! tool_version_at_least no-mistakes "$no_mistakes_min"; then
+    echo "MISSING: no-mistakes (install: $(install_cmd no-mistakes))"
   fi
   if command -v lavish-axi >/dev/null 2>&1 && ! tool_version_at_least lavish-axi "$LAVISH_AXI_MIN"; then
     echo "MISSING: lavish-axi (install: $(install_cmd lavish-axi))"
@@ -1275,8 +1332,8 @@ detect_local_config() {
 
 # The order below is the order the diagnostics have always printed in, so a
 # `skip` run is the same output with the network lines removed rather than a
-# reshuffle. `gh auth status` sits between the two local blocks because that is
-# where it has always been.
+# reshuffle. Provider authentication sits between the two local blocks because
+# the old GitHub authentication probe lived there.
 # Each network owner below is bracketed by an elapsed-time record, so a deferred
 # stage that ran long can be attributed to the phase that spent the time.
 # fm-timing-lib.sh discards the record unless the caller asked for timings, and
@@ -1286,11 +1343,43 @@ detect_local_config() {
 # The stamp variable is named for the library rather than `start` on purpose:
 # fleet_sync and others assign plain names like `start` without `local`, and
 # bash's dynamic scoping would let them overwrite a stamp held by a caller.
+forge_auth_status() {
+  local provider host capability project mode key
+  local -a seen=()
+  if ! fm_forge_capability_validate; then
+    return 0
+  fi
+  while IFS='|' read -r provider host capability project mode; do
+    [ "$capability" = read-write ] || continue
+    key="$provider|$host"
+    case " ${seen[*]} " in *" $key "*) continue ;; esac
+    seen+=("$key")
+    case "$provider" in
+      github)
+        command -v gh >/dev/null 2>&1 || continue
+        if ! gh auth status --hostname "$host" >/dev/null 2>&1; then
+          if [ "$host" = github.com ]; then
+            echo "NEEDS_GH_AUTH"
+          else
+            echo "NEEDS_GH_AUTH: host=$host (run gh auth login --hostname $host)"
+          fi
+        fi
+        ;;
+      gitlab)
+        command -v glab >/dev/null 2>&1 || continue
+        if ! glab auth status --hostname "$host" >/dev/null 2>&1; then
+          echo "NEEDS_GITLAB_AUTH: host=$host (run glab auth login --hostname $host)"
+        fi
+        ;;
+    esac
+  done < <(fm_forge_required_targets "$PROJECTS")
+}
+
 local_phase && detect_local_tools
 if network_phase; then
   __fm_timing_stamp=$(fm_timing_now_ms)
-  gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
-  fm_timing_record phase gh-auth "$__fm_timing_stamp"
+  forge_auth_status
+  fm_timing_record phase forge-auth "$__fm_timing_stamp"
 fi
 local_phase && detect_local_config
 

@@ -261,7 +261,8 @@ $ echo $?
 A project that runs no pipeline at all therefore cannot merge through this path.
 That is the intended reading of the requirement rather than an oversight: a successful pipeline at the head is a condition, and "there is no pipeline" does not satisfy it.
 
-Both refusals came after `pr=` was recorded and the merge poll was armed, exactly as a failing `gh-axi pr merge` does on the GitHub side, so a refusal still leaves the audit trail and the watch in place.
+These pre-merge condition refusals come after `pr=` is recorded and the merge poll is armed, exactly as a failing `gh-axi pr merge` does on the GitHub side, so an otherwise-ready but not-yet-mergeable request remains watchable.
+Provider capability, CLI, and authentication refusals happen earlier and leave no new merge metadata or poll behind, so an unavailable GitLab credential cannot create a misleading pending watch.
 
 A recorded `pr_head=` that no longer matches the live head is reported, and the live head is what gets verified.
 The stale value below was written into the task record by hand, because a GitLab task never records one on its own:

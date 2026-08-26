@@ -18,7 +18,9 @@
 # override, blank-env defaulting, partial-output relay, and pre-launch timeout
 # scan.
 # Dedicated network-phase cases pin FM_BOOTSTRAP_NETWORK as a true partition of
-# one run into its local and network halves, and the one-hop tasks-axi
+# one run into its local and network halves, and provider-capability cases cover
+# GitHub R/W, GitLab R/W without GitHub auth, GitLab auth failure, and mixed
+# read-only GitHub plus read-write GitLab homes. The one-hop tasks-axi
 # compatibility handoff that keeps a session start from paying for that verdict
 # twice.
 set -u
@@ -39,7 +41,8 @@ export FM_BACKEND_CMUX_BUNDLE_BIN="$TMP_ROOT/no-bundled-cmux"
 unset TMUX TMUX_PANE HERDR_ENV HERDR_PANE_ID HERDR_SESSION HERDR_SOCKET_PATH \
   CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_SOCKET_PATH CMUX_TAB_ID CMUX_PANEL_ID 2>/dev/null || true
 
-# A fake toolchain where every required tool is present and gh is authenticated.
+# A fake toolchain where every universal tool is present and GitHub auth is
+# available when a test adds a writable GitHub project.
 # treehouse's `get --help` advertises --lease only when FM_FAKE_TREEHOUSE_LEASE_HELP=1.
 make_fake_toolchain() {
   local dir=$1 fakebin
@@ -298,7 +301,7 @@ test_bootstrap_reporting() {
     esac
   done <<'ROWS'
 treehouse --lease support is accepted silently^1^0.2.4^1^manual^empty^^
-treehouse without --lease reports an upgrade, gh auth is fine^0^0.2.4^1^-^grep^MISSING: treehouse (install: curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh)^NEEDS_GH_AUTH
+treehouse without --lease reports an upgrade without a forge target^0^0.2.4^1^-^grep^MISSING: treehouse (install: curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh)^NEEDS_GH_AUTH
 compatible tasks-axi is silent by default^1^0.2.4^1^-^empty^^
 missing tasks-axi is required by default^1^-^1^-^exact^MISSING: tasks-axi (install: npm install -g tasks-axi)^
 incompatible tasks-axi is required by default^1^0.1.0^1^-^exact^MISSING: tasks-axi (install: npm install -g tasks-axi)^
@@ -342,7 +345,7 @@ ROWS
 }
 
 test_gh_axi_min_version() {
-  local label version mode case_dir fakebin out missing n
+  local label version mode case_dir fakebin out missing n project
   missing='MISSING: gh-axi (install: npm install -g gh-axi && gh-axi setup hooks)'
   n=0
   while IFS='^' read -r label version mode; do
@@ -352,8 +355,12 @@ test_gh_axi_min_version() {
     mkdir -p "$case_dir/home/config"
     printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
     fakebin=$(make_fake_toolchain "$case_dir")
+    project="$case_dir/home/projects/github-project"
+    mkdir -p "$case_dir/home/projects"
+    git init -q "$project"
+    git -C "$project" remote add origin https://github.com/example/repo.git
     out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
-      FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_GH_AXI_VERSION="$version" "$ROOT/bin/fm-bootstrap.sh")
+      FM_BOOTSTRAP_NETWORK=skip FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_GH_AXI_VERSION="$version" "$ROOT/bin/fm-bootstrap.sh")
     case "$mode" in
       empty)
         [ -z "$out" ] || fail "$label: expected silence, got: $out" ;;
@@ -892,8 +899,11 @@ test_network_phase_partitions_the_run() {
   mkdir -p "$case_dir/home/config"
   printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
   fakebin=$(make_fake_toolchain "$case_dir")
+  mkdir -p "$case_dir/home/projects"
+  git init -q "$case_dir/home/projects/github-project"
+  git -C "$case_dir/home/projects/github-project" remote add origin https://github.com/example/repo.git
   # Break the two diagnostics that stand for the two halves: a local tool floor
-  # and the network GitHub-auth probe.
+  # and the network provider-auth probe.
   rm -f "$fakebin/node"
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
@@ -902,17 +912,17 @@ SH
   chmod +x "$fakebin/gh"
 
   all_out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
-    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
   assert_contains "$all_out" "MISSING: node (install:" "the unsplit run lost its local diagnostic"
   assert_contains "$all_out" "NEEDS_GH_AUTH" "the unsplit run lost its network diagnostic"
 
   skip_out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
-    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=skip "$ROOT/bin/fm-bootstrap.sh")
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=skip "$ROOT/bin/fm-bootstrap.sh")
   assert_contains "$skip_out" "MISSING: node (install:" "the local half lost its own diagnostic"
   assert_not_contains "$skip_out" "NEEDS_GH_AUTH" "the local half still made a network call"
 
   only_out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
-    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=only "$ROOT/bin/fm-bootstrap.sh")
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=only "$ROOT/bin/fm-bootstrap.sh")
   assert_contains "$only_out" "NEEDS_GH_AUTH" "the network half lost its own diagnostic"
   assert_not_contains "$only_out" "MISSING: node" "the network half repeated the local half's work"
 
@@ -923,7 +933,7 @@ SH
   # A typo must never silently drop a safety sweep, so anything unrecognized
   # resolves to the complete run.
   [ "$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
-    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=sikp "$ROOT/bin/fm-bootstrap.sh")" = "$all_out" ] \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=sikp "$ROOT/bin/fm-bootstrap.sh")" = "$all_out" ] \
     || fail "an unrecognized FM_BOOTSTRAP_NETWORK value did not fall back to the complete run"
   pass "bootstrap: FM_BOOTSTRAP_NETWORK partitions one run into local and network halves"
 }
@@ -1001,7 +1011,7 @@ test_network_phases_record_per_step_elapsed_times() {
     "$ROOT/bin/fm-bootstrap.sh" >/dev/null 2>&1
 
   assert_present "$log" "the network phase recorded no elapsed times at all"
-  assert_timing_record "$log" phase gh-auth '' "the GitHub auth probe was not timed"
+  assert_timing_record "$log" phase forge-auth '' "the provider auth probe was not timed"
   assert_timing_record "$log" phase secondmate-liveness '' "the dead-secondmate relaunch sweep was not timed"
   assert_timing_record "$log" phase secondmate-sync '' "the secondmate convergence sweep was not timed"
   assert_timing_record "$log" phase handoff-delivery '' "the pending handoff sweep was not timed"
@@ -1026,6 +1036,126 @@ test_network_phases_record_per_step_elapsed_times() {
     "$ROOT/bin/fm-bootstrap.sh" >/dev/null 2>&1
   assert_absent "$log" "a run that never asked for timings recorded them anyway"
   pass "bootstrap: each deferred network phase, secondmate, and clone records its own elapsed time"
+}
+
+test_forge_capability_requirements() {
+  local case_dir fakebin project out
+
+  # A writable GitHub project still checks GitHub tooling and authentication.
+  case_dir="$TMP_ROOT/forge-github-rw"
+  mkdir -p "$case_dir/home/config" "$case_dir/home/projects"
+  printf '%s\n' 'github.com github read-write' > "$case_dir/home/config/forge-capabilities"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  project="$case_dir/home/projects/github-project"
+  git init -q "$project"
+  git -C "$project" remote add origin https://github.com/example/repo.git
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "writable GitHub project should pass with GitHub capability, got: $out"
+
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  chmod +x "$fakebin/gh"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "NEEDS_GH_AUTH" "writable GitHub project lost its provider auth diagnostic"
+
+  # GitLab R/W does not invoke GitHub auth, even when the GitHub CLI is unusable.
+  case_dir="$TMP_ROOT/forge-gitlab-rw"
+  mkdir -p "$case_dir/home/config" "$case_dir/home/projects"
+  printf '%s\n' 'forge.example gitlab read-write' > "$case_dir/home/config/forge-capabilities"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  project="$case_dir/home/projects/gitlab-project"
+  git init -q "$project"
+  git -C "$project" remote add origin https://forge.example/group/subgroup/repo.git
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  cat > "$fakebin/glab" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
+  [ "${FM_FAKE_GLAB_AUTH_FAIL:-}" != 1 ]
+  exit $?
+fi
+exit 0
+SH
+  chmod +x "$fakebin/gh" "$fakebin/glab"
+  add_real_jq "$fakebin"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_NO_MISTAKES_VERSION='no-mistakes version v1.32.0 (fake)' \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "NEEDS_GH_AUTH" "GitLab R/W startup was blocked by GitHub auth"
+  assert_not_contains "$out" "MISSING: gh" "GitLab R/W startup required GitHub tooling"
+  assert_not_contains "$out" "FORGE_CAPABILITY" "mapped GitLab host was reported as unknown"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_GLAB_AUTH_FAIL=1 \
+    FM_FAKE_NO_MISTAKES_VERSION='no-mistakes version v1.32.0 (fake)' \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "NEEDS_GITLAB_AUTH: host=forge.example" \
+    "GitLab auth failure did not name the GitLab host"
+
+  # A mixed home can fetch a read-only GitHub source while delivering to GitLab.
+  case_dir="$TMP_ROOT/forge-mixed"
+  mkdir -p "$case_dir/home/config" "$case_dir/home/projects"
+  printf '%s\n' 'github.com github read-only' 'forge.example gitlab read-write' \
+    > "$case_dir/home/config/forge-capabilities"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  for project in github-source gitlab-project; do
+    git init -q "$case_dir/home/projects/$project"
+  done
+  git -C "$case_dir/home/projects/github-source" remote add origin https://github.com/example/source.git
+  git -C "$case_dir/home/projects/gitlab-project" remote add origin https://forge.example/group/subgroup/repo.git
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  cat > "$fakebin/glab" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then exit 0; fi
+exit 0
+SH
+  chmod +x "$fakebin/gh" "$fakebin/glab"
+  add_real_jq "$fakebin"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_NO_MISTAKES_VERSION='no-mistakes version v1.32.0 (fake)' \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "mixed read-only GitHub + writable GitLab startup was blocked: $out"
+
+  # A malformed capability map is actionable rather than silently ignored.
+  case_dir="$TMP_ROOT/forge-invalid-config"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' 'forge.example gitlab read-write extra' > "$case_dir/home/config/forge-capabilities"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "FORGE_CAPABILITY: invalid config/forge-capabilities" \
+    "malformed forge capability config was not reported"
+
+  # The installed no-mistakes GitLab boundary is v1.32.0, not the universal
+  # v1.31.2 floor, because v1.32.0 added self-hosted GitLab detection.
+  case_dir="$TMP_ROOT/forge-gitlab-pipeline-floor"
+  mkdir -p "$case_dir/home/config" "$case_dir/home/projects"
+  printf '%s\n' 'forge.example gitlab read-write' > "$case_dir/home/config/forge-capabilities"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  project="$case_dir/home/projects/gitlab-pipeline"
+  git init -q "$project"
+  git -C "$project" remote add origin https://forge.example/group/subgroup/pipeline.git
+  cat > "$fakebin/glab" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$fakebin/glab"
+  add_real_jq "$fakebin"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_NO_MISTAKES_VERSION='no-mistakes version v1.31.2 (fake)' \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "MISSING: no-mistakes (install:" \
+    "GitLab pipeline did not enforce the v1.32.0 provider boundary"
+  pass "bootstrap scopes forge tools and authentication to GitHub/GitLab write capability"
 }
 
 test_tasks_axi_verdict_handoff_is_consumed_once() {
@@ -1173,6 +1303,7 @@ test_routine_bootstrap_contract_runs_under_system_bash
 test_network_phase_partitions_the_run
 test_network_sweeps_recheck_lock_ownership
 test_network_phases_record_per_step_elapsed_times
+test_forge_capability_requirements
 test_tasks_axi_verdict_handoff_is_consumed_once
 test_crew_dispatch_active_rules_are_verbose_bootstrap_info
 test_crew_dispatch_validation

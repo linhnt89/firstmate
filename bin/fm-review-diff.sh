@@ -4,17 +4,22 @@
 # Pooled project clones do not keep their local default branch current, so this
 # helper compares remote-backed projects against origin/<default> after fetching
 # the default branch, and local-only projects against the local default branch.
-# When state/<id>.meta records pr= (URL or number) for an open PR, the compare
-# side is ALWAYS a freshly fetched refs/pull/<n>/head by default so review stays
-# current after no-mistakes fix rounds push to the PR. A recorded pr_head= is
-# only a fallback when fetch fails (stale recorded SHAs must never win over a
-# reachable remote PR head). If neither PR head can be resolved, fall back to
-# the local branch with a warning. Without pr=, compare the local branch.
+# When state/<id>.meta records pr= (URL or number) for an open provider review
+# request, the compare side is ALWAYS a freshly fetched provider review head by
+# default so review stays current after no-mistakes fix rounds push to the request.
+# A recorded pr_head= is only a fallback when fetch fails (stale recorded SHAs
+# must never win over a reachable remote review head). If neither review head can
+# be resolved, fall back to the local branch with a warning. Without pr=, compare
+# the local branch.
 # Usage: fm-review-diff.sh <task-id> [--stat]
 #   --stat prints only the stat summary; default prints stat summary plus full diff.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-pr-lib.sh
+. "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-forge-capability-lib.sh
+. "$SCRIPT_DIR/fm-forge-capability-lib.sh"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
@@ -82,6 +87,10 @@ pr_number_from_target() {
       n=${target##*/pull/}
       n=${n%%[!0-9]*}
       ;;
+    *"/merge_requests/"*)
+      n=${target##*/merge_requests/}
+      n=${n%%[!0-9]*}
+      ;;
     [0-9]*)
       n=${target%%[!0-9]*}
       ;;
@@ -91,14 +100,27 @@ pr_number_from_target() {
   printf '%s' "$n"
 }
 
-fetch_pull_head() {
-  local n=$1 resolved
+fetch_review_head() {
+  local url=$1 n provider ref private_ref resolved
   git -C "$WT" remote get-url origin >/dev/null 2>&1 || return 1
+  fm_pr_url_parse "$url" || return 1
+  provider=$FM_PR_PROVIDER
+  n=$FM_PR_NUMBER
+  case "$provider" in
+    github)
+      ref="refs/pull/$n/head"
+      private_ref="refs/fm-review/pull/$n/head"
+      ;;
+    gitlab)
+      ref="refs/merge-requests/$n/head"
+      private_ref="refs/fm-review/merge-requests/$n/head"
+      ;;
+    *) return 1 ;;
+  esac
   # Fetch into a private ref so a later base-branch fetch cannot clobber the
-  # compare tip via FETCH_HEAD, and so we never review a stale local object.
-  git -C "$WT" fetch --quiet origin \
-    "+refs/pull/$n/head:refs/fm-review/pull/$n/head" >/dev/null 2>&1 || return 1
-  resolved=$(git -C "$WT" rev-parse --verify "refs/fm-review/pull/$n/head^{commit}" 2>/dev/null) || return 1
+  # compare tip via FETCH_HEAD, and so we never review a stale request head.
+  git -C "$WT" fetch --quiet origin "+$ref:$private_ref" >/dev/null 2>&1 || return 1
+  resolved=$(git -C "$WT" rev-parse --verify "$private_ref^{commit}" 2>/dev/null) || return 1
   [ -n "$resolved" ] || return 1
   printf '%s' "$resolved"
 }
@@ -107,7 +129,7 @@ resolve_pr_head() {
   local pr_url=$1 recorded_head=$2 n resolved
   n=$(pr_number_from_target "$pr_url") || true
   if [ -n "$n" ]; then
-    if resolved=$(fetch_pull_head "$n"); then
+    if resolved=$(fetch_review_head "$pr_url"); then
       printf '%s' "$resolved"
       return 0
     fi
@@ -129,7 +151,7 @@ if [ -n "$PR_URL" ]; then
   if PR_HEAD=$(resolve_pr_head "$PR_URL" "$PR_HEAD_RECORDED"); then
     COMPARE_REF=$PR_HEAD
   else
-    echo "warning: PR head unavailable; diff may lag the open PR (using local branch $BRANCH)" >&2
+    echo "warning: review request head unavailable; diff may lag the open request (using local branch $BRANCH)" >&2
   fi
 fi
 
