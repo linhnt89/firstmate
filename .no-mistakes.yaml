@@ -42,3 +42,4 @@ commands:
 test:
   evidence:
     store_in_repo: true
+    dir: .no-mistakes/evidence
