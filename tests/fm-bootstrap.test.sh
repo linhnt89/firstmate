@@ -810,12 +810,18 @@ test_fleet_sync_timeout_is_computed_before_launch() {
 }
 
 make_routine_bootstrap_fixture() {
-  local case_dir=$1 fakebin root home sm c1
+  local case_dir=$1 forge_target=${2:-0} fakebin root home sm c1 forge_project
   root="$case_dir/root"
   home="$case_dir/home"
   sm="$case_dir/sm"
   fm_git_identity
   mkdir -p "$home/config" "$home/state"
+  if [ "$forge_target" = 1 ]; then
+    mkdir -p "$home/projects"
+    forge_project="$home/projects/system-bash-github"
+    git init -q "$forge_project"
+    git -C "$forge_project" remote add origin https://github.com/example/system-bash.git
+  fi
   printf '%s\n' codex > "$home/config/crew-harness"
   printf '%s\n' '{"rules":[{"when":"normal work","use":{"harness":"codex"}}],"default":{"harness":"claude","effort":"low"}}' \
     > "$home/config/crew-dispatch.json"
@@ -834,6 +840,14 @@ make_routine_bootstrap_fixture() {
   git -C "$root" commit -qm initial
   c1=$(git -C "$root" rev-parse HEAD)
   git -C "$root" worktree add -q --detach "$sm" "$c1"
+  # Start the secondmate already converged with the primary's ignored
+  # configuration so this routine-confirmation fixture has no reread nudge to
+  # deliver during bootstrap.
+  printf '%s\n' 7500 > "$home/config/startup-memory-budget"
+  mkdir -p "$sm/config"
+  cp "$home/config/crew-harness" "$sm/config/crew-harness"
+  cp "$home/config/crew-dispatch.json" "$sm/config/crew-dispatch.json"
+  cp "$home/config/startup-memory-budget" "$sm/config/startup-memory-budget"
   printf '%s\n' sm > "$sm/.fm-secondmate-home"
   {
     printf 'window=firstmate:fm-sm\n'
@@ -841,6 +855,9 @@ make_routine_bootstrap_fixture() {
     printf 'harness=codex\n'
     printf 'home=%s\n' "$sm"
   } > "$home/state/sm.meta"
+  # The fixture models a live home, so fm-send can deliver the config reread
+  # nudge without surfacing the ordinary watcher-down guard diagnostic.
+  touch "$home/state/.last-watcher-beat"
   fakebin=$(make_fake_toolchain "$case_dir")
   add_real_jq "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
@@ -862,8 +879,8 @@ SH
 }
 
 run_routine_bootstrap_fixture() {
-  local shell=$1 case_dir=$2 fixture root home fakebin
-  fixture=$(make_routine_bootstrap_fixture "$case_dir")
+  local shell=$1 case_dir=$2 forge_target=${3:-0} fixture root home fakebin
+  fixture=$(make_routine_bootstrap_fixture "$case_dir" "$forge_target")
   root=${fixture%%|*}
   fixture=${fixture#*|}
   home=${fixture%%|*}
@@ -882,10 +899,10 @@ test_routine_bootstrap_confirmations_are_silent() {
 
 test_routine_bootstrap_contract_runs_under_system_bash() {
   local out
-  [ -x /bin/bash ] || { pass "bootstrap routine contract skipped without /bin/bash"; return; }
-  out=$(run_routine_bootstrap_fixture /bin/bash "$TMP_ROOT/routine-bash")
-  [ -z "$out" ] || fail "routine bootstrap contract should be silent under /bin/bash, got: $out"
-  pass "bootstrap routine contract runs under system /bin/bash"
+  [ -x /bin/bash ] || { pass "bootstrap system-Bash forge-capability contract skipped without /bin/bash"; return; }
+  out=$(run_routine_bootstrap_fixture /bin/bash "$TMP_ROOT/routine-bash" 1)
+  [ -z "$out" ] || fail "system Bash forge-capability contract should be silent under /bin/bash, got: $out"
+  pass "bootstrap forge-capability resolution runs under system /bin/bash with a provider target"
 }
 
 # FM_BOOTSTRAP_NETWORK splits one bootstrap run into its local and network

@@ -412,6 +412,8 @@ forge.example gitlab read-write
 
 Use the actual hostnames from the corresponding project origins, without credentials, ports, or paths.
 The provider mapping is host-scoped, so nested GitLab group and subgroup paths remain intact and do not need separate records.
+SSH host aliases remain valid clone and fetch origins because project-origin validation is forge-neutral, but forge capability resolution does not expand `~/.ssh/config` `HostName` entries.
+Use a canonical HTTPS forge origin for remote delivery and review operations; a capability record for an SSH alias alone does not make provider CLI authentication target the alias's canonical host.
 The universal tools remain required in every home, while `gh` and `gh-axi` are checked only for writable GitHub delivery and `glab` plus `jq` only for writable GitLab delivery.
 Clone, fetch, and fleet synchronization use Git and remain available for read-only sources.
 If a task requests a remote delivery mode against a read-only or unmapped host, Firstmate refuses before starting it and explains the provider-specific capability or login that is missing.
