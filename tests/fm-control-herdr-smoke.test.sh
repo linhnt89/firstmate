@@ -11,7 +11,8 @@
 #
 # No real agent is launched. herdr's `pane report-agent` is the same registry
 # the adapter reads, so registering and not registering an agent on a plain
-# shell pane exercises exactly the classification the control plane gates on.
+# shell pane exercises the stale-registration boundary; a real shell-owned
+# helper additionally proves lifecycle control refuses unattributed activity.
 #
 # Always runs on a private, named, throwaway lab session, never the default
 # one (tests/herdr-test-safety.sh; the 2026-07-02 incident). Skips cleanly
@@ -89,6 +90,34 @@ EOF
   echo "herdr_pane_id=$PANE_ID"
 } > "$HOME_DIR/state/hsmoke.meta"
 
+# A second exact task pane exercises interpreter arguments without disturbing
+# the first pane's stale-shell and shell-owned-helper lifecycle cases.
+PY_TASK_ID=hsmoke-arg
+PY_SCRATCH_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "fm-$PY_TASK_ID" "$WT") \
+  || fail "create_task failed for the argument-path regression pane"
+read -r PY_TAB_ID PY_PANE_ID <<EOF
+$PY_SCRATCH_IDS
+EOF
+[ -n "$PY_TAB_ID" ] && [ -n "$PY_PANE_ID" ] \
+  || fail "argument-path create_task did not return tab/pane ids"
+{
+  echo "window=$SESSION:$PY_PANE_ID"
+  echo "endpoint_task_id=$PY_TASK_ID"
+  echo "worktree=$WT"
+  echo "project=$PROJ"
+  echo "harness=claude"
+  echo "kind=ship"
+  echo "mode=no-mistakes"
+  echo "yolo=off"
+  echo "model=default"
+  echo "effort=default"
+  echo "backend=herdr"
+  echo "herdr_session=$SESSION"
+  echo "herdr_workspace_id=$WORKSPACE_ID"
+  echo "herdr_tab_id=$PY_TAB_ID"
+  echo "herdr_pane_id=$PY_PANE_ID"
+} > "$HOME_DIR/state/$PY_TASK_ID.meta"
+
 run_control() {
   env FM_HOME="$HOME_DIR" HERDR_SESSION="$SESSION" \
     FM_CONTROL_POLL=0.2 FM_CONTROL_EXIT_WAIT=2 \
@@ -113,37 +142,97 @@ case "$OUT" in
 esac
 pass "real herdr: interrupt refuses when herdr's own agent registry reports no agent"
 
-# --- a registered agent: classification flips, and the verbs follow ---------
+# --- stale registration on a surviving shell: recovery classification --------
 
 herdr pane report-agent "$PANE_ID" --source fm-control-smoke --agent fm-control-smoke-agent \
   --state idle --session "$SESSION" >/dev/null 2>&1 \
-  || fail "could not register a live agent on the task pane"
+  || fail "could not register the stale-agent simulation on the task pane"
 
 STATE=$(fm_backend_agent_state herdr "$SESSION:$PANE_ID")
-[ "$STATE" = alive ] || fail "herdr should classify a registered agent as alive, got '$STATE'"
+[ "$STATE" = dead ] || fail "herdr should classify a registered bare shell as dead after process reconciliation, got '$STATE'"
+pass "real herdr: stale registration does not override the exact lone-idle-shell proof"
 
-OUT=$(run_control hsmoke interrupt) || fail "interrupt against a registered agent should succeed: $OUT"
+if OUT=$(run_control hsmoke interrupt 2>&1); then
+  fail "interrupt should refuse after the registered agent is proven gone: $OUT"
+fi
 case "$OUT" in
-  *"interrupt-delivered hsmoke harness=claude backend=herdr verified=agent-alive cancel=unconfirmed"*) : ;;
-  *) fail "interrupt should report the agent-alive proof on herdr, got: $OUT" ;;
+  *"nothing to interrupt"*) : ;;
+  *) fail "the interrupt refusal should name the already-stopped agent, got: $OUT" ;;
 esac
-pass "real herdr: interrupt delivers the harness's key and proves the agent survived it"
+pass "real herdr: lifecycle control refuses to send agent input to the surviving shell"
+
+OUT=$(run_control hsmoke exit) || fail "exit on the proven stale shell should be idempotent success: $OUT"
+case "$OUT" in
+  "already-stopped hsmoke"*) : ;;
+  *) fail "stale-shell exit should report already-stopped, got: $OUT" ;;
+esac
 
 herdr pane get "$PANE_ID" --session "$SESSION" >/dev/null 2>&1 \
   || fail "the control plane must never remove the endpoint it was operating on"
 [ -d "$WT" ] || fail "the control plane must never remove the task's local copy"
-pass "real herdr: no control verb removed the endpoint or the task's local copy"
+pass "real herdr: stale-shell lifecycle recovery preserves the exact endpoint and local copy"
 
-# Last, because it deliberately types a harness command into a pane that hosts
-# a plain shell: the registered agent cannot actually be stopped that way, and
-# the control plane must say so rather than report a stop it did not achieve.
-if OUT=$(run_control hsmoke exit 2>&1); then
-  fail "exit should fail closed when the agent does not stop: $OUT"
+# A registered pane whose shell owns a background helper is not a positively
+# attributed agent. Lifecycle control must refuse before sending interrupt or
+# exit input, and the exact pane must remain available for later reconciliation.
+fm_backend_herdr_send_literal "$SESSION:$PANE_ID" 'sleep 30 &' \
+  || fail "could not stage a shell-owned helper"
+fm_backend_herdr_send_key "$SESSION:$PANE_ID" Enter \
+  || fail "could not submit the shell-owned helper"
+sleep 0.3
+STATE=$(fm_backend_agent_state herdr "$SESSION:$PANE_ID")
+[ "$STATE" = unreadable ] || fail "shell-owned helper activity must be unreadable, got '$STATE'"
+pass "real herdr: shell-owned helper activity is not promoted to a live agent"
+
+if OUT=$(run_control hsmoke interrupt 2>&1); then
+  fail "interrupt should refuse for unattributed helper activity: $OUT"
 fi
 case "$OUT" in
-  *"did not stop"*) : ;;
-  *) fail "the exit failure should say the agent did not stop, got: $OUT" ;;
+  *"rather than a positively classified state"*) : ;;
+  *) fail "the interrupt refusal should identify unattributed activity, got: $OUT" ;;
 esac
-pass "real herdr: an agent that does not stop fails closed instead of being reported as stopped"
+if OUT=$(run_control hsmoke exit 2>&1); then
+  fail "exit should refuse for unattributed helper activity: $OUT"
+fi
+case "$OUT" in
+  *"rather than a positively classified state"*) : ;;
+  *) fail "the exit refusal should identify unattributed activity, got: $OUT" ;;
+esac
+herdr pane get "$PANE_ID" --session "$SESSION" >/dev/null 2>&1 \
+  || fail "lifecycle refusal must preserve the exact endpoint"
+pass "real herdr: lifecycle control sends no input to an ambiguous shell-owned helper"
 
+# A Python/Node-like interpreter with arbitrary /tmp/claude and /tmp/codex
+# arguments must remain unattributed. The stale registration must not authorize
+# lifecycle input into that process either.
+herdr pane report-agent "$PY_PANE_ID" --source fm-control-smoke --agent fm-control-smoke-arg-agent \
+  --state idle --session "$SESSION" >/dev/null 2>&1 \
+  || fail "could not register the argument-path stale-agent simulation"
+fm_backend_herdr_send_text_line "$SESSION:$PY_PANE_ID" \
+  "python3 -c 'import time; time.sleep(30)' /tmp/claude/input.py /tmp/codex/data" \
+  || fail "could not stage the arbitrary argument-path interpreter"
+sleep 0.3
+STATE=$(fm_backend_agent_state herdr "$SESSION:$PY_PANE_ID")
+[ "$STATE" = unreadable ] || fail "arbitrary interpreter argument paths must stay unreadable, got '$STATE'"
+pass "real herdr: arbitrary interpreter argument paths do not create positive attribution"
+
+if OUT=$(run_control "$PY_TASK_ID" interrupt 2>&1); then
+  fail "interrupt should refuse for arbitrary interpreter argument paths: $OUT"
+fi
+case "$OUT" in
+  *"rather than a positively classified state"*) : ;;
+  *) fail "the interpreter argument-path interrupt refusal was unclear, got: $OUT" ;;
+esac
+if OUT=$(run_control "$PY_TASK_ID" exit 2>&1); then
+  fail "exit should refuse for arbitrary interpreter argument paths: $OUT"
+fi
+case "$OUT" in
+  *"rather than a positively classified state"*) : ;;
+  *) fail "the interpreter argument-path exit refusal was unclear, got: $OUT" ;;
+esac
+herdr pane get "$PY_PANE_ID" --session "$SESSION" >/dev/null 2>&1 \
+  || fail "argument-path lifecycle refusal must preserve the exact endpoint"
+pass "real herdr: lifecycle control sends no input to arbitrary interpreter argument paths"
+
+fm_backend_herdr_kill "$SESSION:$PY_PANE_ID" 2>/dev/null || true
 fm_backend_herdr_kill "$SESSION:$PANE_ID" 2>/dev/null || true
