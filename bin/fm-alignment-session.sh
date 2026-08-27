@@ -635,6 +635,9 @@ retain_session() {
     fi
     retained_archive_valid \
       || fail "alignment archive for $SESSION_ID is incomplete or belongs to another project"
+    if [ "$outcome_set" -eq 1 ]; then
+      record_set "$archive_meta" outcome "$outcome"
+    fi
     record_set "$SESSION_RECORD" status completed
     record_set "$SESSION_RECORD" archive "$archive_dir/report.md"
     record_set "$SESSION_RECORD" outcome "$outcome"

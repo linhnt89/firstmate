@@ -701,6 +701,32 @@ KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
 ALIGNMENT_SESSION=$(grep '^alignment_session=' "$META" | tail -1 | cut -d= -f2- || true)
 MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
+alignment_project_key_for_path() {
+  local path=$1 name root meta existing_path collision=0
+  name=$(basename "$path" | sed 's/[^A-Za-z0-9._-]/-/g')
+  [ -n "$name" ] || name=project
+  root="$DATA/alignments/$name"
+  if [ -d "$root" ] && [ ! -L "$root" ]; then
+    for meta in "$root"/*/metadata; do
+      [ -f "$meta" ] && [ ! -L "$meta" ] || continue
+      existing_path=$(grep '^project_path=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+      if [ "$existing_path" = "$path" ]; then
+        printf '%s\n' "$name"
+        return
+      fi
+      [ -z "$existing_path" ] || collision=1
+    done
+  fi
+  if [ "$collision" -eq 1 ]; then
+    if command -v sha256sum >/dev/null 2>&1; then
+      printf '%s' "$path" | sha256sum | cut -c1-12 | sed "s#^#$name-#"
+    else
+      printf '%s' "$path" | shasum -a 256 | cut -c1-12 | sed "s#^#$name-#"
+    fi
+  else
+    printf '%s\n' "$name"
+  fi
+}
 if [ "$ALIGNMENT_SESSION" = 1 ]; then
   ALIGNMENT_RECORD="$STATE/$ID.alignment"
   ALIGNMENT_STATUS=$(grep '^status=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
@@ -708,6 +734,7 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
   ALIGNMENT_PROJECT_NAME=$(grep '^project_name=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_PROJECT_PATH=$(grep '^project_path=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_PROJECT_KEY=$(grep '^project_key=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_DERIVED_PROJECT_KEY=$(alignment_project_key_for_path "$ALIGNMENT_PROJECT_PATH")
   ALIGNMENT_EXPECTED_ARCHIVE="$DATA/alignments/$ALIGNMENT_PROJECT_KEY/$ID/report.md"
   ALIGNMENT_METADATA="${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}/metadata"
   ALIGNMENT_METADATA_SESSION=$(grep '^session_id=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
@@ -722,7 +749,11 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
       && [ -n "$ALIGNMENT_PROJECT_NAME" ] \
       && [ -n "$ALIGNMENT_PROJECT_PATH" ] \
       && [ -n "$ALIGNMENT_PROJECT_KEY" ] \
+      && [ "$ALIGNMENT_PROJECT_KEY" = "$ALIGNMENT_DERIVED_PROJECT_KEY" ] \
       && [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] \
+      && [ ! -L "$DATA/alignments" ] \
+      && [ ! -L "$DATA/alignments/$ALIGNMENT_PROJECT_KEY" ] \
+      && [ ! -L "${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}" ] \
       && [ -f "$ALIGNMENT_ARCHIVE" ] && [ ! -L "$ALIGNMENT_ARCHIVE" ] \
       && [ -f "$ALIGNMENT_METADATA" ] && [ ! -L "$ALIGNMENT_METADATA" ] \
       && [ "$ALIGNMENT_METADATA_SESSION" = "$ID" ] \

@@ -200,6 +200,22 @@ test_archive_selective_retrieval_supersession_and_promotion() {
     "archive identity refusal did not preserve teardown safety"
   sed -i "s#^project_path=.*#project_path=$PROJECT#" \
     "$PARENT/data/alignments/project/one/metadata"
+  # A matching archive under a key unrelated to the project path must not authorize cleanup.
+  mkdir -p "$PARENT/data/alignments/substituted"
+  mv "$PARENT/data/alignments/project/one" "$PARENT/data/alignments/substituted/one"
+  sed -i 's/^project_key=.*/project_key=substituted/' "$PARENT/state/one.alignment" "$PARENT/data/alignments/substituted/one/metadata"
+  sed -i 's#^archive=.*#archive='$PARENT'/data/alignments/substituted/one/report.md#' "$PARENT/state/one.alignment"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h1" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1)
+  [ "$?" -ne 0 ] || fail "direct cleanup accepted an archive under a substituted project key"
+  assert_contains "$out" 'valid parent-owned archive' \
+    "project-key validation did not preserve teardown safety"
+  mv "$PARENT/data/alignments/substituted/one" "$PARENT/data/alignments/project/one"
+  sed -i 's/^project_key=.*/project_key=project/' "$PARENT/state/one.alignment" "$PARENT/data/alignments/project/one/metadata"
+  sed -i 's#^archive=.*#archive='$PARENT'/data/alignments/project/one/report.md#' "$PARENT/state/one.alignment"
   out=$(run_session "$h1" inventory "$PROJECT")
   assert_contains "$out" $'session=one\ttopic=first topic' \
     "inventory did not enumerate the retained project artifact"
@@ -221,6 +237,11 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   run_session "$h2" retain two >/dev/null
   assert_grep 'outcome=both' "$PARENT/state/two.alignment" \
     "idempotent retain did not recover the archived downstream outcome"
+  run_session "$h2" retain two --outcome knowledge-only >/dev/null
+  assert_grep 'outcome=knowledge-only' "$PARENT/state/two.alignment" \
+    "explicit idempotent retain did not update the session outcome"
+  assert_grep 'outcome=knowledge-only' "$PARENT/data/alignments/project/two/metadata" \
+    "explicit idempotent retain left archive outcome metadata stale"
   assert_present "$PARENT/data/alignments/project/one/report.md" \
     "superseded historical report was discarded"
   assert_present "$PARENT/data/alignments/project/two/report.md" \
