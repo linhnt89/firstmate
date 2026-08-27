@@ -382,6 +382,37 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   pass "archive discovery is metadata-only, retrieval is selective, supersession preserves history, and promotion stays on the normal project path"
 }
 
+test_archive_staging_recovers_atomically() {
+  local home="$TMP_ROOT/session-staging"
+  home=$(make_ephemeral_home session-staging)
+  run_session "$home" start staged "$PROJECT" 'staged topic' --harness claude >/dev/null
+  write_report "$home" staged 'staged topic'
+  mkdir -p "$PARENT/data/alignments/project/.staged.tmp"
+  cp "$home/data/staged/report.md" "$PARENT/data/alignments/project/.staged.tmp/report.md"
+  cat > "$PARENT/data/alignments/project/.staged.tmp/metadata" <<EOF
+schema=fm-alignment-archive.v1
+project_name=project
+project_path=$PROJECT
+project_key=project
+session_id=staged
+topic=staged topic
+source=local
+status=completed
+report=report.md
+supersedes=
+outcome=both
+retained=2024-01-01T00:00:00Z
+EOF
+  run_session "$home" retain staged >/dev/null
+  assert_present "$PARENT/data/alignments/project/staged/report.md" \
+    "retention did not publish a recovered staged archive"
+  assert_absent "$PARENT/data/alignments/project/.staged.tmp" \
+    "retention left the recovered staging directory behind"
+  assert_grep 'outcome=both' "$PARENT/state/staged.alignment" \
+    "retention did not recover the staged outcome"
+  pass "retention recovers complete staging and publishes it atomically"
+}
+
 test_archive_symlink_ancestors_are_rejected() {
   local data escape archive_home out status
   data="$TMP_ROOT/symlink-data"
@@ -476,6 +507,7 @@ test_fresh_isolated_sessions_and_parent_archive
 test_project_key_reservation_isolates_same_basename_projects
 test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
+test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_requires_retention_and_abandon_is_explicit
 echo '# all fm-alignment-session tests passed'

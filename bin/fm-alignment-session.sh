@@ -235,6 +235,7 @@ project_unchanged() {
 retained_archive_valid() {
   local expected_dir expected_report meta
   expected_dir=$(archive_dir_for "$SESSION_PROJECT_KEY" "$SESSION_ID")
+  archive_path_safe "$expected_dir"
   expected_report="$expected_dir/report.md"
   meta="$expected_dir/metadata"
   [ "$SESSION_ARCHIVE" = "$expected_report" ] || return 1
@@ -718,7 +719,7 @@ validate_session_identity() {
 }
 
 retain_session() {
-  local current_id report='' supersedes='' outcome='' outcome_set=0 archive_dir archive_meta tmp source_report prior_archive expected_key archive_tmp
+  local current_id report='' supersedes='' outcome='' outcome_set=0 archive_dir archive_meta tmp source_report prior_archive expected_key archive_tmp staged_outcome
   local -a superseded_ids=()
   [ "$#" -ge 1 ] || usage
   require_parent_home
@@ -787,16 +788,47 @@ retain_session() {
     printf 'retained alignment report %s\n' "$archive_dir/report.md"
     return 0
   fi
-  archive_tmp="$(dirname "$archive_dir")/.$current_id.tmp.$$"
-  [ ! -e "$archive_tmp" ] && [ ! -L "$archive_tmp" ] \
-    || fail "alignment archive staging path already exists: $archive_tmp"
-  mkdir "$archive_tmp"
-  RETENTION_TMP="$archive_tmp"
-  source_report="$archive_tmp/report.md"
-  cp -- "$report" "$source_report"
-  validate_session_identity "$source_report"
-  tmp="$archive_tmp/metadata"
-  while IFS= read -r id; do
+  archive_tmp="$(dirname "$archive_dir")/.$current_id.tmp"
+  archive_path_safe "$archive_tmp"
+  if [ -e "$archive_tmp" ]; then
+    [ -d "$archive_tmp" ] && [ ! -L "$archive_tmp" ] \
+      || fail "alignment archive staging path is unsafe: $archive_tmp"
+    source_report="$archive_tmp/report.md"
+    tmp="$archive_tmp/metadata"
+    [ -f "$source_report" ] && [ ! -L "$source_report" ] \
+      || fail "alignment archive staging path is incomplete: $archive_tmp"
+    [ -f "$tmp" ] && [ ! -L "$tmp" ] \
+      || fail "alignment archive staging path is incomplete: $archive_tmp"
+    SESSION_ARCHIVE="$source_report"
+    validate_session_identity "$source_report"
+    [ "$(read_record_field "$tmp" session_id || true)" = "$SESSION_ID" ] \
+      || fail "alignment archive staging path has the wrong session"
+    [ "$(read_record_field "$tmp" project_name || true)" = "$SESSION_PROJECT_NAME" ] \
+      || fail "alignment archive staging path has the wrong project name"
+    [ "$(read_record_field "$tmp" project_path || true)" = "$SESSION_PROJECT_PATH" ] \
+      || fail "alignment archive staging path has the wrong project"
+    [ "$(read_record_field "$tmp" project_key || true)" = "$SESSION_PROJECT_KEY" ] \
+      || fail "alignment archive staging path has the wrong archive key"
+    [ "$(read_record_field "$tmp" status || true)" = completed ] \
+      || fail "alignment archive staging path is not complete"
+    [ "$(read_record_field "$tmp" report || true)" = report.md ] \
+      || fail "alignment archive staging path has an invalid report pointer"
+    staged_outcome=$(read_record_field "$tmp" outcome || true)
+    case "$staged_outcome" in
+      implementation|knowledge-only|both|neither) ;; *) fail "alignment archive staging path has an invalid outcome" ;;
+    esac
+    if [ "$outcome_set" -eq 1 ] && [ "$staged_outcome" != "$outcome" ]; then
+      fail "alignment archive staging path has a different outcome"
+    fi
+    outcome="$staged_outcome"
+  else
+    mkdir "$archive_tmp"
+    RETENTION_TMP="$archive_tmp"
+    source_report="$archive_tmp/report.md"
+    cp -- "$report" "$source_report"
+    validate_session_identity "$source_report"
+    tmp="$archive_tmp/metadata"
+    while IFS= read -r id; do
     [ -n "$id" ] || continue
     id_valid "$id" || fail "invalid superseded alignment id: $id"
     superseded_ids+=("$id")
@@ -820,10 +852,11 @@ EOF
       "$(IFS=,; printf '%s' "${superseded_ids[*]:-}")" "$outcome" \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$tmp"
-  mkdir "$archive_dir"
-  mv -f -- "$source_report" "$archive_dir/report.md"
-  mv -f -- "$tmp" "$archive_dir/metadata"
-  rmdir "$archive_tmp" 2>/dev/null || true
+  fi
+  [ ! -e "$archive_dir" ] && [ ! -L "$archive_dir" ] \
+    || fail "alignment archive directory appeared during retention: $archive_dir"
+  archive_path_safe "$archive_dir"
+  mv -- "$archive_tmp" "$archive_dir"
   RETENTION_TMP=
   record_set "$SESSION_RECORD" status completed
   record_set "$SESSION_RECORD" archive "$archive_dir/report.md"
@@ -909,6 +942,7 @@ retrieve_session() {
   [ "$(read_record_field "$meta" report || true)" = report.md ] \
     || fail "alignment $sid has an invalid report pointer"
   archive="$archive_data/alignments/$key/$sid"
+  archive_path_safe "$archive"
   report="$archive/report.md"
   [ -f "$report" ] && [ ! -L "$report" ] || fail "retained alignment $sid has no report"
   "$SCRIPT_DIR/fm-alignment.sh" validate-report "$report" --complete \
