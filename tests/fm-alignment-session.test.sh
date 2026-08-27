@@ -311,6 +311,23 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   assert_contains "$(cat "$h1/data/charter.md")" \
     "bin/fm-alignment-session.sh retrieve $PROJECT one --archive-home $PARENT" \
     "ephemeral charter did not provide the parent archive retrieval boundary"
+  sed -i 's/^status=.*/status=running/' "$PARENT/data/alignments/project/one/metadata"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
+    FM_DATA_OVERRIDE="$h1/data" FM_STATE_OVERRIDE="$h1/state" \
+    "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT" 2>&1)
+  [ "$?" -ne 0 ] || fail "retrieval accepted an incomplete archive"
+  assert_contains "$out" 'is not completed' \
+    "retrieval did not validate archive completion status"
+  sed -i 's/^status=.*/status=completed/' "$PARENT/data/alignments/project/one/metadata"
+  cp "$PARENT/data/alignments/project/one/report.md" "$TMP_ROOT/one-report.md"
+  printf 'not an alignment report\n' > "$PARENT/data/alignments/project/one/report.md"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
+    FM_DATA_OVERRIDE="$h1/data" FM_STATE_OVERRIDE="$h1/state" \
+    "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT" 2>&1)
+  [ "$?" -ne 0 ] || fail "retrieval accepted an invalid archive report"
+  assert_contains "$out" 'has an invalid report' \
+    "retrieval did not validate the retained report contract"
+  mv "$TMP_ROOT/one-report.md" "$PARENT/data/alignments/project/one/report.md"
 
   write_report "$h2" two 'second topic' 'Superseding domain decision.'
   run_session "$h2" retain two --supersedes one --outcome both >/dev/null

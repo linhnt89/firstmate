@@ -239,6 +239,7 @@ retained_archive_valid() {
     implementation|knowledge-only|both|neither) ;;
     *) return 1 ;;
   esac
+  [ "$(read_record_field "$meta" outcome || true)" = "$(read_record_field "$SESSION_RECORD" outcome || true)" ] || return 1
 }
 
 firstmate_home_is_fresh() {
@@ -703,14 +704,12 @@ retain_session() {
       outcome=$(read_record_field "$archive_meta" outcome || true)
       [ -n "$outcome" ] || outcome=neither
     fi
-    retained_archive_valid \
-      || fail "alignment archive for $SESSION_ID is incomplete or belongs to another project"
-    if [ "$outcome_set" -eq 1 ]; then
-      record_set "$archive_meta" outcome "$outcome"
-    fi
     record_set "$SESSION_RECORD" status completed
     record_set "$SESSION_RECORD" archive "$archive_dir/report.md"
     record_set "$SESSION_RECORD" outcome "$outcome"
+    record_set "$archive_meta" outcome "$outcome"
+    retained_archive_valid \
+      || fail "alignment archive for $SESSION_ID is incomplete or belongs to another project"
     printf 'retained alignment report %s\n' "$archive_dir/report.md"
     return 0
   fi
@@ -788,7 +787,7 @@ inventory_session() {
 }
 
 retrieve_session() {
-  local project_input sid project key meta archive report archive_home='' archive_data
+  local project_input sid project project_name key meta archive report topic outcome archive_home='' archive_data
   [ "$#" -ge 2 ] || usage
   project_input=$1
   sid=$2
@@ -813,11 +812,36 @@ retrieve_session() {
   id_valid "$sid" || fail "invalid alignment session id: $sid"
   meta="$archive_data/alignments/$key/$sid/metadata"
   [ -f "$meta" ] && [ ! -L "$meta" ] || fail "no retained alignment $sid for project $project"
+  project_name=$(read_record_field "$meta" project_name || true)
+  [ "$project_name" = "$(project_name_for_path "$project")" ] \
+    || fail "alignment $sid has an invalid project identity"
   [ "$(read_record_field "$meta" project_path || true)" = "$project" ] \
     || fail "alignment $sid is associated with another project"
+  [ "$(read_record_field "$meta" project_key || true)" = "$key" ] \
+    || fail "alignment $sid has an invalid archive key"
+  [ "$(read_record_field "$meta" session_id || true)" = "$sid" ] \
+    || fail "alignment $sid has an invalid session identity"
+  [ "$(read_record_field "$meta" status || true)" = completed ] \
+    || fail "alignment $sid is not completed"
+  outcome=$(read_record_field "$meta" outcome || true)
+  case "$outcome" in
+    implementation|knowledge-only|both|neither) ;;
+    *) fail "alignment $sid has an invalid outcome" ;;
+  esac
+  topic=$(read_record_field "$meta" topic || true)
+  [ -n "$topic" ] || fail "alignment $sid has no topic"
+  [ "$(read_record_field "$meta" report || true)" = report.md ] \
+    || fail "alignment $sid has an invalid report pointer"
   archive="$archive_data/alignments/$key/$sid"
   report="$archive/report.md"
   [ -f "$report" ] && [ ! -L "$report" ] || fail "retained alignment $sid has no report"
+  "$SCRIPT_DIR/fm-alignment.sh" validate-report "$report" --complete \
+    --session "$sid" --project "$project_name" >/dev/null \
+    || fail "retained alignment $sid has an invalid report"
+  grep -Fqx "Path: $project" "$report" \
+    || fail "retained alignment $sid report has an invalid project path"
+  grep -Fqx "Topic: $topic" "$report" \
+    || fail "retained alignment $sid report has an invalid topic"
   cat "$report"
 }
 
