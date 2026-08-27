@@ -19,10 +19,9 @@ It is not a post-implementation review, a replacement for validation, or a new w
 
 Classify the request against the decision surface before making an implementation brief.
 
-Use `Alignment contract: bypassed` for a mechanical change with an explicit outcome, established behavior, and no material choice left for the implementation worker.
-Examples include a bounded typo correction, a direct version update with a fixed target, or a test-only change whose expected behavior is already specified.
-
-Use `Alignment contract: required` when a reasonable implementation would have to choose among product behavior, public or internal contract shape, data meaning, architecture, compatibility policy, or another decision that could materially change the outcome.
+New ship and scout briefs begin with `Alignment contract: unclassified`.
+Firstmate must explicitly classify the request before implementation: use `bypassed` for a mechanical change with an explicit outcome, established behavior, and no material choice left for the implementation worker, or use `required` when a reasonable implementation would have to choose among product behavior, public or internal contract shape, data meaning, architecture, compatibility policy, or another decision that could materially change the outcome.
+Examples of bypassed work include a bounded typo correction, a direct version update with a fixed target, or a test-only change whose expected behavior is already specified.
 Investigation may proceed while alignment is pending, but implementation must not spawn or be promoted from a scout until the contract is complete.
 
 Do not treat a recommendation, report, issue body, or chat answer as a captain decision merely because it sounds decisive.
@@ -52,7 +51,9 @@ Do not create one Secondmate per project, add a provider setting, or make an ord
 
 The captain may converse directly with the selected local Secondmate for the focused alignment session.
 Firstmate owns routing and lifecycle, but must not relay the detailed captain/executor conversation or reconstruct it from chat history.
-A marked request from Firstmate must still use the Secondmate's parent status or document-pointer return channel.
+A marked request from Firstmate must still use the Secondmate's parent status or document-pointer return channel and preserve its correlation.
+For a captain-initiated direct local session, the Secondmate runs `bin/fm-alignment.sh start [<alignment-id>]`, writes the outcome in its own `data/<alignment-id>/report.md`, and runs `bin/fm-alignment.sh complete-direct <alignment-id>` when ready.
+That command resolves the seeded local parent, validates the report, and writes an uncorrelated keyed document pointer; it never fabricates a `corr=<id>` token.
 
 The local executor writes the outcome, not a transcript, to its own home at `data/<id>/report.md`.
 The completed report must contain exactly these semantic sections, with a meaningful body in each:
@@ -86,9 +87,9 @@ A report may retain open decisions while the conversation is in progress.
 Before claiming implementation-ready completion, run `bin/fm-alignment.sh validate-report <report> --complete` and pass `captain-hold-lifecycle`'s completion gate for every genuine captain-owned decision.
 The completed report's final section must explicitly state that no material open decisions remain.
 
-When direct alignment reaches implementation-ready completion, notify the parent with the existing correlated report path.
+When parent-routed alignment reaches implementation-ready completion, notify the parent with the existing correlated report path.
 Use `bin/fm-secondmate-report.sh --doc <parent-status-file> done <corr-id> <report-path> ...` or the equivalent parent status contract, and preserve the exact `corr=<id>` token.
-The parent consumes the durable report pointer and never needs the Secondmate's chat transcript.
+For a direct captain-initiated local alignment, `complete-direct` uses the existing parent status/document-pointer stream with a keyed uncorrelated line; the parent consumes the durable report pointer and never needs the Secondmate's chat transcript.
 
 If the captain owns a remaining choice, use `bin/fm-captain-hold.sh hold` in the home that owns the work, report the keyed decision, and stop the alignment completion path until the captain's actual answer is recorded.
 Do not report a complete alignment while a material captain-held decision remains open.

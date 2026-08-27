@@ -257,11 +257,13 @@ The `data/secondmates.md` line contract is owned by the [`secondmate-provisionin
 ## Pre-implementation alignment
 
 Firstmate classifies the request before implementation intake and keeps clear mechanical work on the ordinary direct-delegation path.
+New ship and scout briefs start `Alignment contract: unclassified`; a ship cannot spawn until firstmate records `bypassed` or a completed alignment outcome, while a scout may investigate unclassified and its promotion requires that same explicit classification.
 A material unresolved product, behavioral, contract, data-semantic, or architectural choice sets `Alignment contract: required` in the ship brief and routes a focused pre-implementation alignment through a suitable local Secondmate or the existing external-specialist issue protocol.
 The alignment lifecycle is not post-implementation review and does not add a worker kind, provider configuration, or parallel database.
-A local alignment conversation is durable in the Secondmate home's `data/<id>/report.md`, while an external conversation remains on its coherent GitHub source issue.
+A local alignment conversation is durable in the Secondmate home's `data/<alignment-id>/report.md`; a direct captain-initiated session can allocate and complete it through `bin/fm-alignment.sh`, which sends a keyed uncorrelated parent document pointer, while a parent-routed request preserves its existing correlation.
+An external conversation remains on its coherent GitHub source issue.
 The report or issue outcome is consumed into the implementation brief as explicit goal, facts, settled decisions, acceptance criteria, scope, engineering discretion, and remaining open decisions.
-`bin/fm-spawn.sh` and scout promotion refuse implementation while the contract is required, and accept `complete` only when the brief carries a complete outcome with no material open decisions.
+`bin/fm-spawn.sh` and scout promotion refuse implementation while the contract is unclassified or required, and accept `complete` only when the brief carries a complete outcome with no material open decisions.
 The conditional reasoning, direct-captain interaction, external handoff, report shape, and contradiction escalation rules are owned by the [`alignment` skill](../.agents/skills/alignment/SKILL.md).
 
 ## Delivery modes are explicit per task

@@ -11,8 +11,8 @@
 # alongside the kind= flip. Firstmate resolves both at promotion time, having just
 # read the scout's report (AGENTS.md section 7); data/projects.md holds the
 # captain's standing posture as context, and this script never looks it up.
-# If the scout's brief carries a pre-implementation alignment contract, promotion
-# applies the same barrier as fm-spawn and refuses while material decisions remain.
+# Promotion requires an explicit pre-implementation alignment classification:
+# unclassified or legacy briefs remain safe to investigate but cannot become ships.
 # no-mistakes-prod-only is a registry policy rather than a task mode and is refused.
 # Usage: fm-promote.sh <task-id> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off>
 set -eu
@@ -118,8 +118,8 @@ grep -qx 'kind=scout' "$META" || { echo "error: task $ID is not a scout task (ki
 
 BRIEF="$FM_HOME/data/$ID/brief.md"
 if [ -e "$BRIEF" ] || [ -L "$BRIEF" ]; then
-  "$FM_ROOT/bin/fm-alignment.sh" check "$BRIEF" || {
-    echo "error: alignment barrier refused promotion of $ID; complete the pre-implementation alignment outcome before starting implementation" >&2
+  "$FM_ROOT/bin/fm-alignment.sh" check "$BRIEF" --promotion || {
+    echo "error: alignment barrier refused promotion of $ID; explicitly classify or complete the pre-implementation alignment before starting implementation" >&2
     exit 1
   }
 fi

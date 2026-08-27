@@ -230,6 +230,11 @@ evaluate the conclusion.
 Describe the recommended implementation or investigation direction without
 over-specifying unrelated details.
 
+### Engineering discretion
+
+State which implementation choices remain deliberately open after the
+recommendation, and which choices must stay fixed.
+
 ### Alternatives considered
 
 - Alternative:

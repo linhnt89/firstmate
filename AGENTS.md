@@ -291,9 +291,9 @@ A diagnostic request, report, recommendation, or implementation-ready finding is
 Load `diagnostic-reasoning` before scoping a reported bug and before acting on a diagnostic report.
 
 Before implementation intake, classify whether material product, behavioral, contract, data-semantic, or architectural decisions remain unresolved.
-Load `alignment` for that conditional reasoning path; clear mechanical requests use the brief's `Alignment contract: bypassed` path without a design interview.
-A material request uses `Alignment contract: required` and must not spawn or promote implementation until a completed local Secondmate report or external handoff has been consumed into a complete implementation brief.
-The alignment skill owns the local direct-conversation and external-specialist procedures, while `bin/fm-spawn.sh` and scout promotion enforce the brief barrier.
+Load `alignment` for that conditional reasoning path; new ship and scout briefs start `Alignment contract: unclassified`, and clear mechanical requests explicitly become `bypassed` without a design interview.
+A material request becomes `Alignment contract: required` and must not spawn or promote implementation until a completed local Secondmate report or external handoff has been consumed into a complete implementation brief.
+The alignment skill owns the local direct-conversation and external-specialist procedures, while `bin/fm-spawn.sh` and scout promotion enforce the brief barrier; scouts may investigate while unclassified, but promotion requires an explicit classification.
 
 Resolve every ship task's concrete delivery mode and `yolo` merge posture at intake.
 Pass the mode explicitly to the brief, and pass both values explicitly to the spawn and any scout promotion; each command refuses to guess the values it consumes.
@@ -516,7 +516,7 @@ Preserve durable structured identifiers, dependencies, and completion artifact l
 ## 11. Crewmate briefs
 
 `bin/fm-brief.sh` and its help own scaffold syntax, generated variants, status protocol, delivery-mode definitions of done, and exact safety mechanics.
-Ship briefs carry one `Alignment contract: bypassed|required|complete` line; replace the standard mechanical default during intake when the alignment skill requires a barrier, and retain the completed outcome without reinterpreting settled decisions.
+Ship briefs carry one `Alignment contract: unclassified|bypassed|required|complete` line; replace the unclassified scaffold during intake with an explicit mechanical bypass or alignment lifecycle, and retain the completed outcome without reinterpreting settled decisions.
 Use its scaffold as the contract, then replace every `{TASK}` placeholder with a clear task description, acceptance criteria, constraints, and necessary context before dispatch or seeding.
 Keep additions task-specific rather than repeating lifecycle instructions, and alter generated sections only when the task genuinely differs from the standard shape.
 
@@ -556,7 +556,7 @@ These skills are not captain-invocable; load them only at their precise triggers
 - `fmx-respond` - load on an `x-mention <request_id>` `check:` wake to handle the mention, on an `x-mode-error ...` `check:` wake to report the Relay configuration blocker, on a `public-followup ...` `check:` wake or a startup-surfaced public commitment, and on any milestone or terminal wake for a Relay-linked task before posting its completion follow-up; relevant only when Relay is on.
 - `firstmate-codexapp` - load before coordinating a visible Codex Desktop thread, evaluating a Codex App backend request, or reconciling Codex Desktop host-tool smoke evidence for Firstmate work.
 - `firstmate-coding-guidelines` - load before changing firstmate's shared, tracked material, as defined by section 1's list, whether editing directly or briefing a crewmate for a firstmate-repo task.
-- `alignment` - load before implementation intake when material product, behavioral, contract, data-semantic, or architectural decisions remain unresolved; clear mechanical requests use the brief's bypass path without loading it.
+- `alignment` - load before implementation intake when material product, behavioral, contract, data-semantic, or architectural decisions remain unresolved; clear mechanical requests explicitly become the brief's bypass path without loading it, while new scaffolds remain unclassified until intake decides.
 
 ## 14. Relay
 

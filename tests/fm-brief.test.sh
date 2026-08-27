@@ -209,14 +209,30 @@ test_ship_modes_generate_clean_briefs() {
     assert_grep "# Definition of done" "$brief" "$id: brief missing Definition of done section"
     grep -qx "Delivery contract: mode=$mode" "$brief" \
       || fail "$id: brief did not record its machine-readable delivery contract line"
-    grep -qx "Alignment contract: bypassed" "$brief" \
-      || fail "$id: brief did not record the clear-mechanical alignment default"
+    grep -qx "Alignment contract: unclassified" "$brief" \
+      || fail "$id: brief did not start with an explicit unclassified alignment state"
     assert_grep "{TASK}" "$brief" "$id: brief missing the {TASK} placeholder"
     assert_grep "mid-task \`working:\` line (including setup complete) is nonterminal" "$brief" \
       "$id: brief missing nonterminal working:/setup-complete gate protection"
     assert_no_grep "EOF" "$brief" "$id: brief leaked a heredoc EOF marker (unterminated heredoc)"
   done
   pass "fm-brief.sh: no-mistakes/direct-PR/local-only briefs generate cleanly"
+}
+
+test_scout_briefs_start_unclassified_but_allow_investigation() {
+  local home brief
+  home="$TMP_ROOT/scout-alignment-home"
+  mkdir -p "$home/data"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-scout-alignment-a1 some-proj --scout >/dev/null 2>&1 \
+    || fail "scout brief should scaffold"
+  brief="$home/data/brief-scout-alignment-a1/brief.md"
+  grep -qx "Alignment contract: unclassified" "$brief" \
+    || fail "scout brief did not start with an explicit unclassified alignment state"
+  assert_grep 'This scout may investigate while alignment is unclassified or required' "$brief" \
+    "scout brief did not allow investigation before classification"
+  assert_grep 'before promotion to implementation' "$brief" \
+    "scout brief did not require classification before promotion"
+  pass "fm-brief.sh: scouts begin unclassified and remain safe for investigation"
 }
 
 # A ship task's delivery mode is firstmate's per-task decision, so a missing or
@@ -568,6 +584,12 @@ test_secondmate_marked_request_reporting_contract() {
     "secondmate charter did not require alignment report validation"
   assert_grep '--complete' "$brief" \
     "secondmate charter did not require complete alignment report validation"
+  assert_grep 'bin/fm-alignment.sh start <alignment-id>' "$brief" \
+    "secondmate charter did not allocate direct alignment reports"
+  assert_grep 'bin/fm-alignment.sh complete-direct <alignment-id>' "$brief" \
+    "secondmate charter did not provide direct alignment completion"
+  assert_grep 'uncorrelated keyed document pointer' "$brief" \
+    "secondmate charter did not preserve the uncorrelated direct parent route"
   assert_grep 'do not relay that detailed conversation' "$brief" \
     "secondmate charter did not preserve direct-captain alignment privacy"
   assert_grep 'States: working, needs-decision, blocked, paused, done, failed.' "$brief" \
@@ -765,6 +787,7 @@ test_script_parses
 test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
+test_scout_briefs_start_unclassified_but_allow_investigation
 test_ship_mode_is_required_and_closed_set
 test_ship_mode_is_explicit_not_registry
 test_delivery_flags_are_refused_where_they_do_not_apply

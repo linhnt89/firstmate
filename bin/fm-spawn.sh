@@ -131,8 +131,10 @@
 #   see AGENTS.md task lifecycle); --secondmate records kind=secondmate and launches in a
 #   provisioned firstmate home; the default is kind=ship.
 #   A fresh or relaunched ship checks its brief's pre-implementation alignment contract
-#   before creating or joining an endpoint. `required` is refused, `bypassed` keeps clear
-#   mechanical work direct, and `complete` is accepted only with a complete outcome.
+#   before creating or joining an endpoint. `unclassified` and `required` are refused,
+#   `bypassed` keeps clear mechanical work direct, and `complete` is accepted only with
+#   a complete outcome. Scouts may investigate while unclassified, but promotion applies
+#   the refusal until an explicit `bypassed` or `complete` classification is recorded.
 #   Before a secondmate launch, the home is locally fast-forwarded to the primary
 #   default-branch commit when safe; skipped syncs warn and launch unchanged.
 #   Ship/scout spawns refuse to launch unless the resolved task path is a real
@@ -1663,10 +1665,17 @@ fi
 
 # The alignment contract is checked before any backend creates an endpoint or
 # any relaunch joins an existing one. An absent line remains compatible with
-# pre-alignment briefs, while new scaffolds record `bypassed` explicitly.
+# pre-alignment briefs, while new scaffolds record `unclassified` explicitly.
 if [ "$KIND" = ship ]; then
   "$FM_ROOT/bin/fm-alignment.sh" check "$BRIEF" || {
-    echo "error: alignment barrier refused ship $ID; complete the pre-implementation alignment outcome before spawning implementation" >&2
+    echo "error: alignment barrier refused ship $ID; explicitly classify or complete the pre-implementation alignment before spawning implementation" >&2
+    exit 1
+  }
+elif [ "$KIND" = scout ]; then
+  # Investigation is allowed to begin unclassified; promotion later requires
+  # an explicit bypassed or complete classification.
+  "$FM_ROOT/bin/fm-alignment.sh" check "$BRIEF" --investigation || {
+    echo "error: alignment barrier refused scout $ID; the investigation brief is invalid" >&2
     exit 1
   }
 fi
