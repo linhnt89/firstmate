@@ -299,6 +299,13 @@ canonical_document_is_text() {
   [ ! -L "$file" ] && [ -f "$file" ] && LC_ALL=C grep -Iq . "$file"
 }
 
+canonical_document_title() {
+  local file=$1 title
+  title=$(LC_ALL=C awk '/^[[:space:]]*#[[:space:]]+/ { sub(/^[[:space:]]*#[[:space:]]+/, ""); print; exit }' "$file")
+  [ -n "$title" ] || title='(untitled owner)'
+  printf '%s\n' "$title" | tr '\t\r\n' '   '
+}
+
 write_agents_chain() {
   local project=$1 current=$1 file
   local -a chain=()
@@ -325,21 +332,15 @@ write_canonical_context() {
     printf 'This is a fresh session for exactly one project and one topic.\n'
     printf 'Canonical project knowledge below is supplied by Firstmate. Read the relevant owners before declaring readiness; documentation audience labels do not determine authority.\n\n'
     printf '## Current canonical project knowledge\n\n'
-    printf 'Existing maintained owners are preferred over new memory files. The complete text of every discovered text documentation owner is included without truncation.\n'
+    printf 'Existing maintained owners are preferred over new memory files. This context supplies a compact owner index; the strong executor reads topic-relevant owners directly from the project path.\n'
     write_agents_chain "$project"
     printf '\n### Current-document owner index\n\n'
+    printf 'Entries are metadata only so unrelated or oversized owners cannot exhaust the session context. No owner is copied or truncated; inspect any required owner at its listed project path.\n\n'
     while IFS= read -r file; do
       canonical_document_is_text "$file" || continue
       relative=${file#"$project"/}
-      printf '%s\t%s bytes\tread from project path %s\n' "$relative" "$(wc -c < "$file" | tr -d ' ')" "$file"
-    done < <(canonical_document_paths "$project" | LC_ALL=C sort -u)
-    while IFS= read -r file; do
-      canonical_document_is_text "$file" || continue
-      relative=${file#"$project"/}
-      case "$relative" in AGENTS.md) continue ;; esac
-      printf '\n### Canonical owner: %s\n\n' "$relative"
-      cat "$file"
-      printf '\n'
+      printf '%s\t%s bytes\t%s\tread from project path %s\n' \
+        "$relative" "$(wc -c < "$file" | tr -d ' ')" "$(canonical_document_title "$file")" "$file"
     done < <(canonical_document_paths "$project" | LC_ALL=C sort -u)
     printf '\n## Historical alignment inventory\n\n'
     printf 'The following metadata-only inventory is deterministic and project-scoped.\n'
@@ -367,7 +368,7 @@ Topic: $SESSION_TOPIC
 
 Read the current project at the path above and read \
 \`data/alignment-context.md\` before reasoning.
-The context contains the AGENTS chain, a current-document owner index, complete current canonical owner text, and a compact historical inventory. Inspect the relevant canonical owners from that index before declaring the alignment ready; do not silently omit or truncate a required owner.
+The context contains the AGENTS chain, a compact current-document owner index, and a compact historical inventory. Use the index and the project's owner pointers to inspect topic-relevant canonical owners directly before declaring the alignment ready; never silently omit or truncate a required owner.
 Historical report bodies are not loaded automatically; retrieve only a relevant one with this explicit parent-owned command:
   bin/fm-alignment-session.sh retrieve $project_q $session_q --archive-home $parent_home_q
 

@@ -161,10 +161,17 @@ assert_session_identity() {
     "alignment runtime did not reuse the captain-facing Secondmate capability"
   assert_absent "$PARENT/data/secondmates.md" \
     "fresh alignment silently registered a persistent Secondmate"
-  assert_grep 'Canonical project terminology.' "$home/data/alignment-context.md" \
-    "session did not hydrate current canonical project knowledge"
-  assert_grep 'The canonical domain owner is authoritative for alignment facts.' "$home/data/alignment-context.md" \
-    "session omitted a maintained canonical documentation owner"
+  assert_not_contains "$(cat "$home/data/alignment-context.md")" \
+    'The canonical domain owner is authoritative for alignment facts.' \
+    "session copied unrelated canonical owner text into its compact context"
+  assert_grep $'README.md\t' "$home/data/alignment-context.md" \
+    "session omitted the maintained README owner from its index"
+  assert_grep $'docs/domain.md\t' "$home/data/alignment-context.md" \
+    "session omitted a maintained canonical documentation owner from its index"
+  assert_grep $'docs/oversized.md\t' "$home/data/alignment-context.md" \
+    "session omitted the oversized owner from its navigable index"
+  assert_not_contains "$(cat "$home/data/alignment-context.md")" 'unrelated owner payload' \
+    "session loaded oversized owner content instead of keeping it navigable"
   assert_grep 'Current-document owner index' "$home/data/alignment-context.md" \
     "session did not provide a current-document owner index"
   assert_grep 'Historical alignment inventory' "$home/data/alignment-context.md" \
@@ -173,6 +180,10 @@ assert_session_identity() {
 
 test_fresh_isolated_sessions_and_parent_archive() {
   local h1 h2 out
+  printf '# Oversized unrelated owner\n\n' > "$PROJECT/docs/oversized.md"
+  awk 'BEGIN { for (i = 0; i < 10000; i++) print "unrelated owner payload" }' >> "$PROJECT/docs/oversized.md"
+  git -C "$PROJECT" add docs/oversized.md
+  git -C "$PROJECT" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm 'add oversized owner fixture'
   h1=$(make_ephemeral_home session-one)
   out=$(run_session "$h1" start one "$PROJECT" 'first topic')
   assert_contains "$out" 'started alignment session one project=project topic=first topic' \
