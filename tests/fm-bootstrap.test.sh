@@ -1007,6 +1007,42 @@ assert_timing_record() {
 # a stand-in: what is being pinned is that each network owner is actually wrapped.
 # bin/fm-timing-lib.sh stays inert unless FM_TIMING_LOG names a file, so an
 # ordinary bootstrap run is unaffected either way, which is asserted here too.
+test_alignment_liveness_preserves_ephemeral_marker() {
+  local case_dir fakebin temp_root spawn_log
+  case_dir="$TMP_ROOT/alignment-liveness"
+  mkdir -p "$case_dir/home/config" "$case_dir/home/state" "$case_dir/home/data" "$case_dir/home/projects"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  printf '%s\n' $$ > "$case_dir/home/state/.lock"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  temp_root="$case_dir/root"
+  mkdir -p "$temp_root"
+  cp -a "$ROOT/bin" "$temp_root/bin"
+  spawn_log="$case_dir/spawn.log"
+  cat > "$temp_root/bin/fm-spawn.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FM_ALIGNMENT_SPAWN_LOG:?}"
+SH
+  chmod +x "$temp_root/bin/fm-spawn.sh"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = list-windows ]; then
+  printf "can't find session: firstmate\n" >&2
+fi
+exit 1
+SH
+  chmod +x "$fakebin/tmux"
+  fm_write_secondmate_meta "$case_dir/home/state/alignment.meta" "$case_dir/home" firstmate:fm-alignment alpha claude
+  printf '%s\n' alignment_session=1 >> "$case_dir/home/state/alignment.meta"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$temp_root" \
+    FM_ALIGNMENT_SPAWN_LOG="$spawn_log" FM_BOOTSTRAP_NETWORK=only \
+    FM_BOOTSTRAP_NETWORK_LOCK_PID=$$ FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    "$temp_root/bin/fm-bootstrap.sh" >"$case_dir/bootstrap.out" 2>&1
+  [ -f "$spawn_log" ] || fail "alignment liveness did not invoke the recovery interface: $(cat "$case_dir/bootstrap.out")"
+  [ "$(cat "$spawn_log")" = 'alignment --secondmate --alignment-session' ] \
+    || fail "alignment recovery lost its ephemeral marker: $(cat "$spawn_log")"
+  pass "bootstrap preserves ephemeral alignment identity during liveness recovery"
+}
+
 test_network_phases_record_per_step_elapsed_times() {
   local case_dir fakebin log fields
   case_dir="$TMP_ROOT/network-timings"
@@ -1317,6 +1353,7 @@ test_fleet_sync_timeout_empty_override_uses_default
 test_fleet_sync_timeout_is_computed_before_launch
 test_routine_bootstrap_confirmations_are_silent
 test_routine_bootstrap_contract_runs_under_system_bash
+test_alignment_liveness_preserves_ephemeral_marker
 test_network_phase_partitions_the_run
 test_network_sweeps_recheck_lock_ownership
 test_network_phases_record_per_step_elapsed_times
