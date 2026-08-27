@@ -203,6 +203,14 @@ project_key_for_path() {
 
 archive_root_for() { printf '%s/alignments/%s\n' "$DATA" "$1"; }
 archive_dir_for() { printf '%s/alignments/%s/%s\n' "$DATA" "$1" "$2"; }
+archive_report_pointer() {
+  local key=$1 sid=$2
+  if [ "$DATA" = "$FM_HOME/data" ]; then
+    printf 'data/alignments/%s/%s/report.md\n' "$key" "$sid"
+  else
+    printf '%s/alignments/%s/%s/report.md\n' "$DATA" "$key" "$sid"
+  fi
+}
 
 published_archive_metadata_valid() {
   local meta=$1 project=$2 key=$3 archive_dir sid report outcome
@@ -330,6 +338,10 @@ retained_archive_valid() {
     *) return 1 ;;
   esac
   [ "$(read_record_field "$meta" outcome || true)" = "$(read_record_field "$SESSION_RECORD" outcome || true)" ] || return 1
+  "$SCRIPT_DIR/fm-alignment.sh" validate-report "$expected_report" --complete \
+    --session "$SESSION_ID" --project "$SESSION_PROJECT_NAME" >/dev/null 2>&1 || return 1
+  grep -Fqx "Path: $SESSION_PROJECT_PATH" "$expected_report" || return 1
+  grep -Fqx "Topic: $(read_record_field "$meta" topic || true)" "$expected_report" || return 1
 }
 
 firstmate_home_is_fresh() {
@@ -1039,8 +1051,8 @@ inventory_session() {
     status=$(read_record_field "$meta" status || true)
     topic=$(read_record_field "$meta" topic || true)
     supersedes=$(read_record_field "$meta" supersedes || true)
-    printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport=data/alignments/%s/%s/report.md\tretrieve=bin/fm-alignment-session.sh retrieve %q %q --archive-home %q --archive-data %q\n' \
-      "$sid" "$topic" "$status" "$supersedes" "$key" "$sid" "$project" "$sid" "$FM_HOME" "$DATA"
+    printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport=%s\tretrieve=bin/fm-alignment-session.sh retrieve %q %q --archive-home %q --archive-data %q\n' \
+      "$sid" "$topic" "$status" "$supersedes" "$(archive_report_pointer "$key" "$sid")" "$project" "$sid" "$FM_HOME" "$DATA"
     meta_count=$((meta_count + 1))
   done < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name metadata \
     ! -path "$root/.*.tmp/metadata" -print | LC_ALL=C sort)
@@ -1168,7 +1180,7 @@ promote_session() {
     "$brief" > "$tmp"
   mv -f -- "$tmp" "$brief"
   sed "s/^Alignment contract: unclassified$/Alignment contract: complete/" "$brief" > "$tmp"
-  awk -v source="Alignment source: data/alignments/$SESSION_PROJECT_KEY/$SESSION_ID/report.md" \
+  awk -v source="Alignment source: $(archive_report_pointer "$SESSION_PROJECT_KEY" "$SESSION_ID")" \
     '!done && $0 == "Alignment contract: complete" { print; print source; done=1; next } { print }' \
     "$tmp" > "$brief.new"
   mv -f -- "$brief.new" "$brief"

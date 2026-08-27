@@ -124,7 +124,7 @@ remaining_is_clear() {
 }
 
 validate_session_report() {
-  local file=$1 session_id=$2 project_name=$3 content heading body
+  local file=$1 session_id=$2 project_name=$3 project_path=${4:-} content heading body
   content=$(validate_sections "$file")
   for heading in 'Project identity' 'Alignment identity' 'Durable-knowledge candidates'; do
     if [ "$(printf '%s\n' "$content" | grep -c -E "^## ${heading}[[:space:]]*$" || true)" != 1 ]; then
@@ -135,6 +135,8 @@ validate_session_report() {
   done
   grep -Fqx "Name: $project_name" "$file" \
     || fail "$file does not identify project $project_name"
+  [ -z "$project_path" ] || grep -Fqx "Path: $project_path" "$file" \
+    || fail "$file does not identify project path $project_path"
   grep -Fqx "Session: $session_id" "$file" \
     || fail "$file does not identify session $session_id"
   remaining_is_clear "$content" \
@@ -251,7 +253,7 @@ EOF
 }
 
 complete_direct_alignment() {
-  local id=${1:-} report content mate_id parent_home parent_status note session_project
+  local id=${1:-} report content mate_id parent_home parent_status note session_project session_project_path
   [ "$#" -ge 1 ] || usage
   alignment_home
   alignment_id_valid "$id" || fail "invalid alignment id: $id"
@@ -261,8 +263,10 @@ complete_direct_alignment() {
   content=$(validate_sections "$report")
   if [ -f "$FM_HOME/data/$id/session.meta" ] && [ ! -L "$FM_HOME/data/$id/session.meta" ]; then
     session_project=$(sed -n 's/^project_name=//p' "$FM_HOME/data/$id/session.meta" | tail -1)
+    session_project_path=$(sed -n 's/^project_path=//p' "$FM_HOME/data/$id/session.meta" | tail -1)
     [ -n "$session_project" ] || fail "alignment session metadata has no project name"
-    validate_session_report "$report" "$id" "$session_project"
+    [ -n "$session_project_path" ] || fail "alignment session metadata has no project path"
+    validate_session_report "$report" "$id" "$session_project" "$session_project_path"
   else
     remaining_is_clear "$content" \
       || fail "$report still has material open decisions in '## Remaining open decisions'"

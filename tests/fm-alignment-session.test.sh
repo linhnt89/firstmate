@@ -341,6 +341,12 @@ test_archive_selective_retrieval_supersession_and_promotion() {
       --archive-data "$TMP_ROOT/custom-data")
   assert_contains "$out" 'Domain term candidate.' \
     "retrieval did not preserve the explicitly configured parent archive data root"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$TMP_ROOT/custom-data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    "$SESSION" inventory "$PROJECT")
+  assert_contains "$out" "report=$TMP_ROOT/custom-data/alignments/project/one/report.md" \
+    "inventory emitted a report pointer for the wrong archive data root"
   mv "$TMP_ROOT/custom-data/alignments" "$PARENT/data/alignments"
   assert_contains "$(cat "$h1/data/charter.md")" \
     "bin/fm-alignment-session.sh retrieve $PROJECT one --archive-home $PARENT" \
@@ -387,6 +393,13 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   assert_contains "$out" $'session=one\ttopic=first topic' "historical inventory lost the earlier report"
   assert_contains "$out" $'session=two-promotion\ttopic=second topic' "historical inventory lost the superseding report"
 
+  cp "$PARENT/data/alignments/project/two-promotion/report.md" "$TMP_ROOT/two-promotion-report.md"
+  printf 'corrupted retained report\n' > "$PARENT/data/alignments/project/two-promotion/report.md"
+  out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only 2>&1)
+  [ "$?" -ne 0 ] || fail "promotion accepted a corrupted retained report"
+  assert_contains "$out" 'no valid parent-owned archive' \
+    "promotion did not validate the retained report contract"
+  mv "$TMP_ROOT/two-promotion-report.md" "$PARENT/data/alignments/project/two-promotion/report.md"
   out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose implementation 2>&1)
   [ "$?" -ne 0 ] || fail "promotion reinterpreted a knowledge-only alignment as implementation"
   assert_contains "$out" 'does not authorize implementation promotion' \
