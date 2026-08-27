@@ -298,11 +298,66 @@ alignment_config() {
 }
 
 canonical_document_paths() {
-  local project=$1 file
+  local project=$1
   if [ -d "$project/docs" ] && [ ! -L "$project/docs" ]; then
     find "$project/docs" -type f ! -name '*.report.md' -print
   fi
   find "$project" -maxdepth 1 -type f \( -name '*.md' -o -name '*.mdx' -o -name '*.rst' -o -name '*.adoc' -o -name '*.txt' \) -print
+}
+
+canonical_owner_declaration_sources() {
+  local project=$1 current=$1 file
+  while [ "$current" != / ]; do
+    file="$current/AGENTS.md"
+    if [ -f "$file" ] && [ ! -L "$file" ]; then
+      printf '%s\n' "$file"
+    fi
+    current=$(dirname "$current")
+  done
+  find "$project" -maxdepth 2 -type f \( \
+    -name '.context-owner' -o -name 'context-owner' -o \
+    -name '.owner-pointer' -o -name 'owner-pointer' \
+  \) -print
+}
+
+canonical_owner_declarations() {
+  local project=$1 source declaration candidate base declarations
+  while IFS= read -r source; do
+    case "$(basename "$source")" in
+      .context-owner|context-owner|.owner-pointer|owner-pointer)
+        base=$(dirname "$source")
+        declarations=$(awk '/^[[:space:]]*#/ { next } NF { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }' "$source")
+        ;;
+      *)
+        base=$project
+        declarations=$(awk '
+          /^[[:space:]]*(context-owner|context_owner|owner-pointer|owner_pointer)[[:space:]]*[:=]/ {
+            line=$0
+            sub(/^[[:space:]]*(context-owner|context_owner|owner-pointer|owner_pointer)[[:space:]]*[:=][[:space:]]*`?/, "", line)
+            sub(/`?[[:space:]]*$/, "", line)
+            print line
+          }
+        ' "$source")
+        ;;
+    esac
+    while IFS= read -r declaration; do
+      declaration=${declaration#\`}
+      declaration=${declaration%\`}
+      declaration=${declaration%\\)}
+      declaration=${declaration#\\(}
+      [ -n "$declaration" ] || continue
+      case "$declaration" in
+        /*) continue ;;
+      esac
+      printf '%s' "$declaration" | LC_ALL=C grep -Eq '[[:space:],:;()]' && continue
+      candidate="$base/$declaration"
+      [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+      candidate=$(CDPATH='' cd -- "$(dirname "$candidate")" 2>/dev/null && pwd -P)/$(basename "$candidate") || continue
+      path_is_ancestor "$project" "$candidate" || [ "$candidate" = "$project" ] || continue
+      canonical_document_is_text "$candidate" || continue
+      printf '%s\n' "$candidate"
+    done <<< "$declarations"
+  done < <(canonical_owner_declaration_sources "$project")
 }
 
 canonical_document_is_text() {
@@ -347,10 +402,18 @@ write_canonical_context() {
     write_agents_chain "$project"
     printf '\n### Current-document owner index\n\n'
     printf 'Entries are metadata only so unrelated or oversized owners cannot exhaust the session context. No owner is copied or truncated; inspect any required owner at its listed project path.\n\n'
+    printf 'Explicit owner declarations (highest precedence):\n'
+    while IFS= read -r file; do
+      relative=${file#"$project"/}
+      printf 'explicit\t%s\t%s bytes\t%s\tread from project path %s\n' \
+        "$relative" "$(wc -c < "$file" | tr -d ' ')" "$(canonical_document_title "$file")" "$file"
+    done < <(canonical_owner_declarations "$project" | LC_ALL=C sort -u)
+    printf '\nFallback document candidates (not assumed authoritative):\n'
     while IFS= read -r file; do
       canonical_document_is_text "$file" || continue
       relative=${file#"$project"/}
-      printf '%s\t%s bytes\t%s\tread from project path %s\n' \
+      canonical_owner_declarations "$project" | grep -F -x "$file" >/dev/null 2>&1 && continue
+      printf 'candidate\t%s\t%s bytes\t%s\tread from project path %s\n' \
         "$relative" "$(wc -c < "$file" | tr -d ' ')" "$(canonical_document_title "$file")" "$file"
     done < <(canonical_document_paths "$project" | LC_ALL=C sort -u)
     printf '\n## Historical alignment inventory\n\n'

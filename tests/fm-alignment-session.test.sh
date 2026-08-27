@@ -79,7 +79,7 @@ make_parent_and_project() {
   printf '# Fixture project\n\nCanonical project terminology.\n' > "$PROJECT/README.md"
   mkdir -p "$PROJECT/docs"
   printf '# Domain owner\n\nThe canonical domain owner is authoritative for alignment facts.\n' > "$PROJECT/docs/domain.md"
-  printf '# Project operating knowledge\n' > "$PROJECT/AGENTS.md"
+  printf '# Project operating knowledge\ncontext-owner: docs/domain.md\n' > "$PROJECT/AGENTS.md"
   git -C "$PROJECT" init -q
   git -C "$PROJECT" add README.md AGENTS.md docs/domain.md
   git -C "$PROJECT" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
@@ -166,8 +166,10 @@ assert_session_identity() {
     "session copied unrelated canonical owner text into its compact context"
   assert_grep $'README.md\t' "$home/data/alignment-context.md" \
     "session omitted the maintained README owner from its index"
-  assert_grep $'docs/domain.md\t' "$home/data/alignment-context.md" \
-    "session omitted a maintained canonical documentation owner from its index"
+  assert_grep $'explicit\tdocs/domain.md\t' "$home/data/alignment-context.md" \
+    "session did not prioritize the declared canonical documentation owner"
+  assert_grep $'candidate\tREADME.md\t' "$home/data/alignment-context.md" \
+    "session did not distinguish fallback documentation candidates from owners"
   assert_grep $'docs/oversized.md\t' "$home/data/alignment-context.md" \
     "session omitted the oversized owner from its navigable index"
   assert_not_contains "$(cat "$home/data/alignment-context.md")" 'unrelated owner payload' \
