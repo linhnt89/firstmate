@@ -77,9 +77,11 @@ make_parent_and_project() {
   PROJECT="$TMP_ROOT/project"
   mkdir -p "$PARENT/data" "$PARENT/state" "$PARENT/config" "$PARENT/projects" "$PROJECT"
   printf '# Fixture project\n\nCanonical project terminology.\n' > "$PROJECT/README.md"
+  mkdir -p "$PROJECT/docs"
+  printf '# Domain owner\n\nThe canonical domain owner is authoritative for alignment facts.\n' > "$PROJECT/docs/domain.md"
   printf '# Project operating knowledge\n' > "$PROJECT/AGENTS.md"
   git -C "$PROJECT" init -q
-  git -C "$PROJECT" add README.md AGENTS.md
+  git -C "$PROJECT" add README.md AGENTS.md docs/domain.md
   git -C "$PROJECT" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
   printf 'claude configured-model high\n' > "$PARENT/config/alignment-harness"
   FAKEBIN=$(make_runtime "$TMP_ROOT/runtime")
@@ -161,6 +163,10 @@ assert_session_identity() {
     "fresh alignment silently registered a persistent Secondmate"
   assert_grep 'Canonical project terminology.' "$home/data/alignment-context.md" \
     "session did not hydrate current canonical project knowledge"
+  assert_grep 'The canonical domain owner is authoritative for alignment facts.' "$home/data/alignment-context.md" \
+    "session omitted a maintained canonical documentation owner"
+  assert_grep 'Current-document owner index' "$home/data/alignment-context.md" \
+    "session did not provide a current-document owner index"
   assert_grep 'Historical alignment inventory' "$home/data/alignment-context.md" \
     "session did not include the compact historical inventory"
 }

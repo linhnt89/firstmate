@@ -6,8 +6,8 @@ The configured alignment harness, model, and effort are read from the captain-pr
 
 ## Lifecycle
 
-The session receives the current project knowledge first and a compact, deterministic metadata inventory of prior alignments second.
-The inventory contains no historical report bodies, and Firstmate does not semantically rank them.
+The session receives the AGENTS instruction chain, a deterministic index of current documentation owners, and their complete text first, followed by a compact, deterministic metadata inventory of prior alignments.
+The executor inspects relevant indexed owners before declaring readiness; audience labels do not determine authority, and required owners are not silently truncated. The inventory contains no historical report bodies, and Firstmate does not semantically rank them.
 The executor may use `bin/fm-alignment-session.sh retrieve <project> <session-id>` for one explicitly relevant historical report.
 
 The executor writes a validated report rather than a transcript.

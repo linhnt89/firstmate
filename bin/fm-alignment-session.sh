@@ -286,29 +286,61 @@ alignment_config() {
   done < "$CONFIG/alignment-harness"
 }
 
+canonical_document_paths() {
+  local project=$1 file
+  if [ -d "$project/docs" ] && [ ! -L "$project/docs" ]; then
+    find "$project/docs" -type f ! -name '*.report.md' -print
+  fi
+  find "$project" -maxdepth 1 -type f \( -name '*.md' -o -name '*.mdx' -o -name '*.rst' -o -name '*.adoc' -o -name '*.txt' \) -print
+}
+
+canonical_document_is_text() {
+  local file=$1
+  [ ! -L "$file" ] && [ -f "$file" ] && LC_ALL=C grep -Iq . "$file"
+}
+
+write_agents_chain() {
+  local project=$1 current=$1 file
+  local -a chain=()
+  while [ "$current" != / ]; do
+    file="$current/AGENTS.md"
+    if [ -f "$file" ] && [ ! -L "$file" ]; then
+      chain+=("$file")
+    fi
+    current=$(dirname "$current")
+  done
+  for ((current=${#chain[@]}-1; current>=0; current--)); do
+    file=${chain[current]}
+    printf '\n### AGENTS chain: %s\n\n' "${file#"$project"/}"
+    cat "$file"
+    printf '\n'
+  done
+}
+
 write_canonical_context() {
-  local context=$1 project=$2 file
+  local context=$1 project=$2 file relative
   {
     printf '# Alignment session context\n\n'
     printf 'Project: %s\nPath: %s\n\n' "$SESSION_PROJECT_NAME" "$project"
     printf 'This is a fresh session for exactly one project and one topic.\n'
-    printf 'The project path is the current canonical source; inspect it directly before making recommendations.\n\n'
+    printf 'Canonical project knowledge below is supplied by Firstmate. Read the relevant owners before declaring readiness; documentation audience labels do not determine authority.\n\n'
     printf '## Current canonical project knowledge\n\n'
-    printf 'Existing maintained owners are preferred over new memory files.\n'
-    for file in AGENTS.md README.md CONTRIBUTING.md; do
-      if [ -f "$project/$file" ] && [ ! -L "$project/$file" ]; then
-        printf '\n### %s\n\n' "$file"
-        cat "$project/$file"
-        printf '\n'
-      fi
-    done
-    printf '\n### Documentation inventory\n\n'
-    if [ -d "$project/docs" ] && [ ! -L "$project/docs" ]; then
-      find "$project/docs" -maxdepth 2 -type f ! -name '*.report.md' -print \
-        | LC_ALL=C sort | sed "s#^$project/##;s#^#- #"
-    else
-      printf 'No docs directory was found; inspect the project for its existing knowledge owner.\n'
-    fi
+    printf 'Existing maintained owners are preferred over new memory files. The complete text of every discovered text documentation owner is included without truncation.\n'
+    write_agents_chain "$project"
+    printf '\n### Current-document owner index\n\n'
+    while IFS= read -r file; do
+      canonical_document_is_text "$file" || continue
+      relative=${file#"$project"/}
+      printf '%s\t%s bytes\tread from project path %s\n' "$relative" "$(wc -c < "$file" | tr -d ' ')" "$file"
+    done < <(canonical_document_paths "$project" | LC_ALL=C sort -u)
+    while IFS= read -r file; do
+      canonical_document_is_text "$file" || continue
+      relative=${file#"$project"/}
+      case "$relative" in AGENTS.md) continue ;; esac
+      printf '\n### Canonical owner: %s\n\n' "$relative"
+      cat "$file"
+      printf '\n'
+    done < <(canonical_document_paths "$project" | LC_ALL=C sort -u)
     printf '\n## Historical alignment inventory\n\n'
     printf 'The following metadata-only inventory is deterministic and project-scoped.\n'
     printf 'Do not load every historical report.\nUse the explicit retrieval command only for a relevant session.\n\n'
@@ -335,7 +367,7 @@ Topic: $SESSION_TOPIC
 
 Read the current project at the path above and read \
 \`data/alignment-context.md\` before reasoning.
-The context contains current canonical knowledge and a compact historical inventory.
+The context contains the AGENTS chain, a current-document owner index, complete current canonical owner text, and a compact historical inventory. Inspect the relevant canonical owners from that index before declaring the alignment ready; do not silently omit or truncate a required owner.
 Historical report bodies are not loaded automatically; retrieve only a relevant one with this explicit parent-owned command:
   bin/fm-alignment-session.sh retrieve $project_q $session_q --archive-home $parent_home_q
 
