@@ -205,9 +205,14 @@ test_archive_selective_retrieval_supersession_and_promotion() {
     "inventory did not enumerate the retained project artifact"
   assert_not_contains "$out" 'Domain term candidate.' \
     "metadata inventory loaded a historical report body"
-  out=$(run_session "$h1" retrieve "$PROJECT" one)
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
+    FM_DATA_OVERRIDE="$h1/data" FM_STATE_OVERRIDE="$h1/state" \
+    "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT")
   assert_contains "$out" 'Domain term candidate.' \
-    "explicit historical retrieval did not return the selected report"
+    "explicit parent-owned historical retrieval did not return the selected report"
+  assert_contains "$(cat "$h1/data/charter.md")" \
+    "bin/fm-alignment-session.sh retrieve $PROJECT one --archive-home $PARENT" \
+    "ephemeral charter did not provide the parent archive retrieval boundary"
 
   write_report "$h2" two 'second topic' 'Superseding domain decision.'
   run_session "$h2" retain two --supersedes one --outcome both >/dev/null

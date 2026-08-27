@@ -6,7 +6,7 @@
 #   fm-alignment-session.sh start <project> <topic> [options]
 #   fm-alignment-session.sh retain <session-id> [report] [--supersedes <id>[,<id>...]] [--outcome <implementation|knowledge-only|both|neither>]
 #   fm-alignment-session.sh inventory <project>
-#   fm-alignment-session.sh retrieve <project> <session-id>
+#   fm-alignment-session.sh retrieve <project> <session-id> [--archive-home <parent-home>]
 #   fm-alignment-session.sh promote <session-id> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--purpose <implementation|knowledge-only|both>] [--task-id <id>]
 #   fm-alignment-session.sh close <session-id> [--abandon]
 #
@@ -155,9 +155,9 @@ project_name_for_path() {
 }
 
 project_key_for_path() {
-  local path=$1 name root meta existing_path collision=0
+  local path=$1 data_root=${2:-$DATA} name root meta existing_path collision=0
   name=$(project_name_for_path "$path")
-  root="$DATA/alignments/$name"
+  root="$data_root/alignments/$name"
   if [ -d "$root" ] && [ ! -L "$root" ]; then
     for meta in "$root"/*/metadata; do
       [ -f "$meta" ] && [ ! -L "$meta" ] || continue
@@ -310,7 +310,10 @@ write_canonical_context() {
 }
 
 write_session_charter() {
-  local charter=$1 context=$2
+  local charter=$1 context=$2 parent_home_q project_q session_q
+  parent_home_q=$(printf '%q' "$FM_HOME")
+  project_q=$(printf '%q' "$SESSION_PROJECT_PATH")
+  session_q=$(printf '%q' "$SESSION_ID")
   cat > "$charter" <<EOF
 You are a fresh, ephemeral captain-facing local alignment executor managed by Firstmate.
 Work only on this bounded alignment conversation; do not wait for a human between turns.
@@ -324,7 +327,8 @@ Topic: $SESSION_TOPIC
 Read the current project at the path above and read \
 \`data/alignment-context.md\` before reasoning.
 The context contains current canonical knowledge and a compact historical inventory.
-Historical report bodies are not loaded automatically; retrieve only a relevant one with the explicit parent-owned command shown in the inventory.
+Historical report bodies are not loaded automatically; retrieve only a relevant one with this explicit parent-owned command:
+  bin/fm-alignment-session.sh retrieve $project_q $session_q --archive-home $parent_home_q
 
 This session is captain-facing only for this alignment topic.
 It is not a persistent Secondmate, it has no standing authority, and it must not become ordinary implementation work.
@@ -703,24 +707,42 @@ inventory_session() {
     status=$(read_record_field "$meta" status || true)
     topic=$(read_record_field "$meta" topic || true)
     supersedes=$(read_record_field "$meta" supersedes || true)
-    printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport=data/alignments/%s/%s/report.md\n' \
-      "$sid" "$topic" "$status" "$supersedes" "$key" "$sid"
+    printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport=data/alignments/%s/%s/report.md\tretrieve=bin/fm-alignment-session.sh retrieve %q %q --archive-home %q\n' \
+      "$sid" "$topic" "$status" "$supersedes" "$key" "$sid" "$project" "$sid" "$FM_HOME"
     meta_count=$((meta_count + 1))
   done < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name metadata -print | LC_ALL=C sort)
   printf 'artifacts=%s\n' "$meta_count"
 }
 
 retrieve_session() {
-  local project_input=$1 sid=$2 project key meta archive report
+  local project_input sid project key meta archive report archive_home='' archive_data
+  [ "$#" -ge 2 ] || usage
+  project_input=$1
+  sid=$2
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --archive-home) [ "$#" -ge 2 ] || usage; archive_home=$2; shift 2 ;;
+      --archive-home=*) archive_home=${1#--archive-home=}; shift ;;
+      *) usage ;;
+    esac
+  done
   require_parent_home
   project=$(project_path_resolve "$project_input")
-  key=$(project_key_for_path "$project")
+  archive_data=$DATA
+  if [ -n "$archive_home" ]; then
+    home_is_safe "$archive_home" || fail "archive home is missing or unsafe: $archive_home"
+    archive_data="$archive_home/data"
+    [ ! -L "$archive_data" ] || fail "archive data directory must not be a symlink: $archive_data"
+    [ -d "$archive_data" ] || fail "archive data directory is missing: $archive_data"
+  fi
+  key=$(project_key_for_path "$project" "$archive_data")
   id_valid "$sid" || fail "invalid alignment session id: $sid"
-  meta="$DATA/alignments/$key/$sid/metadata"
+  meta="$archive_data/alignments/$key/$sid/metadata"
   [ -f "$meta" ] && [ ! -L "$meta" ] || fail "no retained alignment $sid for project $project"
   [ "$(read_record_field "$meta" project_path || true)" = "$project" ] \
     || fail "alignment $sid is associated with another project"
-  archive="$DATA/alignments/$key/$sid"
+  archive="$archive_data/alignments/$key/$sid"
   report="$archive/report.md"
   [ -f "$report" ] && [ ! -L "$report" ] || fail "retained alignment $sid has no report"
   cat "$report"
@@ -831,7 +853,7 @@ case "$COMMAND" in
   start|request|start-session) start_session "$@" ;;
   retain|archive) retain_session "$@" ;;
   inventory|list) [ "$#" -eq 1 ] || usage; inventory_session "$1" ;;
-  retrieve|show) [ "$#" -eq 2 ] || usage; retrieve_session "$1" "$2" ;;
+  retrieve|show) retrieve_session "$@" ;;
   promote|compile) promote_session "$@" ;;
   close|cancel) close_session "$@" ;;
   *) usage ;;
