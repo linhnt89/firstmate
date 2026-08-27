@@ -187,6 +187,19 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   h2="$TMP_ROOT/session-two"
   write_report "$h1" one 'first topic' 'Domain term candidate.'
   run_session "$h1" retain one >/dev/null
+  # A substituted archive identity must not authorize direct ephemeral cleanup.
+  sed -i "s#^project_path=.*#project_path=$TMP_ROOT/foreign-project#" \
+    "$PARENT/data/alignments/project/one/metadata"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h1" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1)
+  [ "$?" -ne 0 ] || fail "direct cleanup accepted an archive with a foreign project identity"
+  assert_contains "$out" 'valid parent-owned archive' \
+    "archive identity refusal did not preserve teardown safety"
+  sed -i "s#^project_path=.*#project_path=$PROJECT#" \
+    "$PARENT/data/alignments/project/one/metadata"
   out=$(run_session "$h1" inventory "$PROJECT")
   assert_contains "$out" $'session=one\ttopic=first topic' \
     "inventory did not enumerate the retained project artifact"
@@ -198,6 +211,11 @@ test_archive_selective_retrieval_supersession_and_promotion() {
 
   write_report "$h2" two 'second topic' 'Superseding domain decision.'
   run_session "$h2" retain two --supersedes one --outcome both >/dev/null
+  # Simulate a crash after archive publication but before the parent record update.
+  sed -i '/^outcome=/d; s/^status=.*/status=running/' "$PARENT/state/two.alignment"
+  run_session "$h2" retain two >/dev/null
+  assert_grep 'outcome=both' "$PARENT/state/two.alignment" \
+    "idempotent retain did not recover the archived downstream outcome"
   assert_present "$PARENT/data/alignments/project/one/report.md" \
     "superseded historical report was discarded"
   assert_present "$PARENT/data/alignments/project/two/report.md" \

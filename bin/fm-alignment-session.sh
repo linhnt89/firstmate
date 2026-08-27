@@ -223,9 +223,14 @@ retained_archive_valid() {
   [ -f "$expected_report" ] && [ ! -L "$expected_report" ] || return 1
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
   [ "$(read_record_field "$meta" session_id || true)" = "$SESSION_ID" ] || return 1
+  [ "$(read_record_field "$meta" project_name || true)" = "$SESSION_PROJECT_NAME" ] || return 1
   [ "$(read_record_field "$meta" project_path || true)" = "$SESSION_PROJECT_PATH" ] || return 1
   [ "$(read_record_field "$meta" project_key || true)" = "$SESSION_PROJECT_KEY" ] || return 1
   [ "$(read_record_field "$meta" status || true)" = completed ] || return 1
+  case "$(read_record_field "$meta" outcome || true)" in
+    implementation|knowledge-only|both|neither) ;;
+    *) return 1 ;;
+  esac
 }
 
 firstmate_home_is_fresh() {
@@ -565,7 +570,7 @@ validate_session_identity() {
 }
 
 retain_session() {
-  local current_id report='' supersedes='' outcome=neither archive_dir archive_meta tmp source_report prior_archive expected_key archive_tmp
+  local current_id report='' supersedes='' outcome='' outcome_set=0 archive_dir archive_meta tmp source_report prior_archive expected_key archive_tmp
   local -a superseded_ids=()
   [ "$#" -ge 1 ] || usage
   require_parent_home
@@ -582,18 +587,20 @@ retain_session() {
   }
   trap retention_cleanup EXIT
   session_load "$current_id"
+  outcome=$(read_record_field "$SESSION_RECORD" outcome || true)
   expected_key=$SESSION_PROJECT_KEY
   shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --supersedes) [ "$#" -ge 2 ] || usage; supersedes=$2; shift 2 ;;
       --supersedes=*) supersedes=${1#--supersedes=}; shift ;;
-      --outcome) [ "$#" -ge 2 ] || usage; outcome=$2; shift 2 ;;
-      --outcome=*) outcome=${1#--outcome=}; shift ;;
+      --outcome) [ "$#" -ge 2 ] || usage; outcome=$2; outcome_set=1; shift 2 ;;
+      --outcome=*) outcome=${1#--outcome=}; outcome_set=1; shift ;;
       -*) usage ;;
       *) [ -z "$report" ] || usage; report=$1; shift ;;
     esac
   done
+  [ -n "$outcome" ] || outcome=neither
   case "$outcome" in implementation|knowledge-only|both|neither) ;; *) fail "outcome must be implementation, knowledge-only, both, or neither" ;; esac
   [ "$SESSION_STATUS" != closed ] || fail "alignment session $SESSION_ID is already closed"
   [ -n "$report" ] || report="$SESSION_HOME/data/$SESSION_ID/report.md"
@@ -618,10 +625,15 @@ retain_session() {
     cmp -s "$report" "$archive_dir/report.md" \
       || fail "alignment session $SESSION_ID already has a different retained report"
     SESSION_ARCHIVE="$archive_dir/report.md"
+    if [ "$outcome_set" -eq 0 ]; then
+      outcome=$(read_record_field "$archive_meta" outcome || true)
+      [ -n "$outcome" ] || outcome=neither
+    fi
     retained_archive_valid \
       || fail "alignment archive for $SESSION_ID is incomplete or belongs to another project"
     record_set "$SESSION_RECORD" status completed
     record_set "$SESSION_RECORD" archive "$archive_dir/report.md"
+    record_set "$SESSION_RECORD" outcome "$outcome"
     printf 'retained alignment report %s\n' "$archive_dir/report.md"
     return 0
   fi
