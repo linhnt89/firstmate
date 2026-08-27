@@ -197,6 +197,26 @@ project_key_for_path() {
 archive_root_for() { printf '%s/alignments/%s\n' "$DATA" "$1"; }
 archive_dir_for() { printf '%s/alignments/%s/%s\n' "$DATA" "$1" "$2"; }
 
+published_archive_metadata_valid() {
+  local meta=$1 project=$2 key=$3 archive_dir sid report outcome
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
+  archive_dir=$(dirname -- "$meta")
+  sid=$(basename -- "$archive_dir")
+  id_valid "$sid" || return 1
+  case "$sid" in .*.tmp) return 1 ;; esac
+  archive_path_safe "$archive_dir"
+  [ "$(read_record_field "$meta" project_name || true)" = "$(project_name_for_path "$project")" ] || return 1
+  [ "$(read_record_field "$meta" project_path || true)" = "$project" ] || return 1
+  [ "$(read_record_field "$meta" project_key || true)" = "$key" ] || return 1
+  [ "$(read_record_field "$meta" session_id || true)" = "$sid" ] || return 1
+  [ "$(read_record_field "$meta" status || true)" = completed ] || return 1
+  [ "$(read_record_field "$meta" report || true)" = report.md ] || return 1
+  outcome=$(read_record_field "$meta" outcome || true)
+  case "$outcome" in implementation|knowledge-only|both|neither) ;; *) return 1 ;; esac
+  report="$archive_dir/report.md"
+  [ -f "$report" ] && [ ! -L "$report" ] || return 1
+}
+
 session_load() {
   local id=$1 record
   record=$STATE/$id.alignment
@@ -881,8 +901,7 @@ inventory_session() {
   }
   while IFS= read -r meta; do
     [ -n "$meta" ] || continue
-    [ -f "$meta" ] && [ ! -L "$meta" ] || continue
-    [ "$(read_record_field "$meta" project_path || true)" = "$project" ] || continue
+    published_archive_metadata_valid "$meta" "$project" "$key" || continue
     sid=$(read_record_field "$meta" session_id || true)
     status=$(read_record_field "$meta" status || true)
     topic=$(read_record_field "$meta" topic || true)
@@ -890,7 +909,8 @@ inventory_session() {
     printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport=data/alignments/%s/%s/report.md\tretrieve=bin/fm-alignment-session.sh retrieve %q %q --archive-home %q\n' \
       "$sid" "$topic" "$status" "$supersedes" "$key" "$sid" "$project" "$sid" "$FM_HOME"
     meta_count=$((meta_count + 1))
-  done < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name metadata -print | LC_ALL=C sort)
+  done < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name metadata \
+    ! -path "$root/.*.tmp/metadata" -print | LC_ALL=C sort)
   printf 'artifacts=%s\n' "$meta_count"
 }
 

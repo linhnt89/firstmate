@@ -403,6 +403,9 @@ supersedes=
 outcome=both
 retained=2024-01-01T00:00:00Z
 EOF
+  out=$(run_session "$home" inventory "$PROJECT")
+  assert_not_contains "$out" $'session=staged\t' \
+    "inventory exposed an unpublished retention staging archive"
   run_session "$home" retain staged >/dev/null
   assert_present "$PARENT/data/alignments/project/staged/report.md" \
     "retention did not publish a recovered staged archive"
