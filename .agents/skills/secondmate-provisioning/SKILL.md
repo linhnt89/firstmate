@@ -40,6 +40,8 @@ This release places whole secondmate homes remotely and never individual workers
 The home-seeded `data/charter.md` is the sole owner of boilerplate idle-by-default behavior, the normal delegation lifecycle, and standard escalation contracts, so point to that charter rather than restating those contracts in the registry entry.
 The `scope:` field is used during intake.
 The `projects:` field is a non-exclusive clone list, not ownership.
+A persistent Secondmate may converse directly only when the captain explicitly initiates a focused pre-implementation alignment session, and only for alignment work within that registered scope.
+That exception does not authorize ordinary implementation, surveys, audits, or self-directed work; ordinary implementation remains routed through the main firstmate, and the direct conversation's durable result is the Secondmate-local alignment report rather than a relayed transcript.
 
 ## Charter and seed
 

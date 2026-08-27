@@ -227,10 +227,11 @@ If returning the lease fails during teardown, firstmate leaves the route and hom
 Seeding is transactional: if validation, cloning, initialization, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
 `local-only` projects stay with the main first mate because they merge into the main local checkout instead of a remote-backed PR path.
 The same project may appear in multiple secondmate homes when their scopes differ, such as issue triage versus feature development.
-Secondmates are idle by default: after startup recovery reconciles only work already in their own home, an empty queue waits silently for routed tasks, and they never self-initiate surveys or audits.
+Secondmates are idle by default: after startup recovery reconciles only work already in their own home, an empty queue waits silently for routed tasks, and they never self-initiate surveys, audits, or other work.
+A persistent Secondmate may converse directly only when the captain explicitly initiates a focused pre-implementation alignment session within its registered scope; ordinary implementation remains routed through firstmate.
 When called with `FM_HOME=<this-firstmate-home>` or when `FM_HOME` is already set to the active firstmate home, metadata-routed `fm-send.sh` requests to a live `kind=secondmate` use the live-charter-compatible `from-firstmate` carrier owned by `bin/fm-operational-input.sh`, so the secondmate returns terse answers through status lines and detailed answers through docs plus status pointers instead of replying only in its own chat.
 The parent guards every marked request against a missing correlated report without reading the secondmate conversation; `bin/fm-pending-reply-lib.sh` owns the correlation, recovery, escalation, and retention contract.
-Explicit backend-target sends and direct human typing stay unmarked, so captain intervention in a secondmate pane remains conversational.
+Explicit backend-target sends stay unmarked, and direct human typing is conversational only for a captain-explicitly-initiated alignment session in the Secondmate's registered scope; ordinary implementation remains parent-routed.
 After seeding a secondmate, `fm-backlog-handoff.sh` validates the fleet-specific handoff, atomically delegates already-judged in-scope queued item moves to `tasks-axi mv`, and then sends a marked routed-work wake through the receiver's recorded endpoint.
 A durable move with a missing, failed, or unresolved wake is reported as failure rather than success; rerunning the same handoff recovers known-undelivered wake intent without moving the item again, while an unresolved delivery is never blindly resent.
 Remote routes move that dependency-closed set into a non-dispatchable backlog-format outbox before transfer, then use an idempotent remote receive under the destination backlog's own lock and retain the outbox until the receiver wake is confirmed.
@@ -253,6 +254,18 @@ Remote routes accept verified harness adapters only and reject raw launch comman
 The [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md) owns the complete inherited-local-material allowlist and propagation contract.
 
 The `data/secondmates.md` line contract is owned by the [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md#routing-table), and the secondmate environment variables are documented in [configuration.md](configuration.md).
+
+## Pre-implementation alignment
+
+Firstmate classifies the request before implementation intake and keeps clear mechanical work on the ordinary direct-delegation path.
+New ship and scout briefs start `Alignment contract: unclassified`; a ship cannot spawn until firstmate records `bypassed` or a completed alignment outcome, while a scout may investigate unclassified and its promotion requires that same explicit classification.
+A material unresolved product, behavioral, contract, data-semantic, or architectural choice sets `Alignment contract: required` in the ship brief and routes a focused pre-implementation alignment through a suitable local Secondmate or the existing external-specialist issue protocol.
+The alignment lifecycle is not post-implementation review and does not add a worker kind, provider configuration, or parallel database.
+A local alignment conversation is durable in the Secondmate home's `data/<alignment-id>/report.md`; a direct captain-initiated session can allocate and complete it through `bin/fm-alignment.sh`, which sends a keyed uncorrelated parent document pointer, while a parent-routed request preserves its existing correlation.
+An external conversation remains on its coherent GitHub source issue.
+The report or issue outcome is consumed into the implementation brief as explicit goal, facts, settled decisions, acceptance criteria, scope, engineering discretion, and remaining open decisions.
+`bin/fm-spawn.sh` and scout promotion refuse implementation while the contract is unclassified or required, and accept `complete` only when the brief carries a complete outcome with no material open decisions.
+The conditional reasoning, direct-captain interaction, external handoff, report shape, and contradiction escalation rules are owned by the [`alignment` skill](../.agents/skills/alignment/SKILL.md).
 
 ## Delivery modes are explicit per task
 

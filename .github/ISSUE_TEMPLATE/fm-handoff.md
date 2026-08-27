@@ -88,6 +88,12 @@ Write:
 if no further design or investigation is required before Firstmate can choose
 an implementation path.
 
+## Engineering discretion
+
+List implementation choices deliberately left to the worker after the product and design contract is settled.
+
+Write `None` when no specific discretion boundary is needed.
+
 ## Out of scope
 
 List work explicitly excluded from this handoff.
