@@ -576,7 +576,8 @@ EOF
   if ! FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" FM_STATE_OVERRIDE="$STATE" \
       FM_PROJECTS_OVERRIDE="$PROJECTS" FM_CONFIG_OVERRIDE="$CONFIG" \
       "$FM_ROOT/bin/fm-spawn.sh" "${spawn_args[@]}"; then
-    if [ -f "$STATE/$session_id.meta" ]; then
+    if [ -f "$STATE/$session_id.meta" ] && [ ! -L "$STATE/$session_id.meta" ]; then
+      record_set "$STATE/$session_id.meta" alignment_abandon 1
       if ! FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" FM_STATE_OVERRIDE="$STATE" \
         FM_CONFIG_OVERRIDE="$CONFIG" "$FM_ROOT/bin/fm-teardown.sh" "$session_id" \
         >/dev/null 2>&1; then

@@ -707,6 +707,14 @@ alignment_project_key_for_path() {
   [ -n "$name" ] || name=project
   root="$DATA/alignments/$name"
   if [ -d "$root" ] && [ ! -L "$root" ]; then
+    if [ -f "$root/.project-path" ] && [ ! -L "$root/.project-path" ]; then
+      reserved_path=$(cat "$root/.project-path")
+      if [ "$reserved_path" = "$path" ]; then
+        printf '%s\n' "$name"
+        return
+      fi
+      [ -z "$reserved_path" ] || collision=1
+    fi
     for meta in "$root"/*/metadata; do
       [ -f "$meta" ] && [ ! -L "$meta" ] || continue
       existing_path=$(grep '^project_path=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)

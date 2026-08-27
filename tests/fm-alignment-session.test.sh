@@ -112,13 +112,13 @@ run_session() {
 }
 
 write_report() {
-  local home=$1 id=$2 topic=$3 candidate=${4:-None identified.}
+  local home=$1 id=$2 topic=$3 candidate=${4:-None identified.} project_path=${5:-$PROJECT}
   cat > "$home/data/$id/report.md" <<EOF
 # Pre-implementation alignment
 
 ## Project identity
 Name: project
-Path: $PROJECT
+Path: $project_path
 
 ## Alignment identity
 Session: $id
@@ -199,7 +199,51 @@ test_project_key_reservation_isolates_same_basename_projects() {
   key_two=$(grep '^project_key=' "$PARENT/state/collision.alignment" | cut -d= -f2-)
   [ "$key_one" != "$key_two" ] || fail "same-basename projects reused one archive key"
   assert_contains "$key_two" 'project-' "colliding project did not receive a deterministic hashed archive key"
+  write_report "$home" collision 'collision topic' 'None identified.' "$COLLISION_PROJECT"
+  run_session "$home" retain collision >/dev/null
+  run_session "$home" close collision >/dev/null || fail "teardown did not honor the reserved hashed project key"
+  assert_absent "$PARENT/state/collision.meta" "collision session runtime metadata survived teardown"
   pass "same-basename project archives reserve and retain distinct deterministic keys"
+}
+
+test_failed_launch_marks_runtime_abandoned_before_rollback() {
+  local home fake_root out status
+  home=$(make_ephemeral_home failed-launch)
+  fake_root="$TMP_ROOT/failed-launch-root"
+  mkdir -p "$fake_root/bin"
+  cat > "$fake_root/bin/fm-spawn.sh" <<'SH'
+#!/usr/bin/env bash
+set -u
+id=$1
+home=$2
+cat > "$FM_STATE_OVERRIDE/$id.meta" <<EOF
+kind=secondmate
+alignment_session=1
+home=$home
+EOF
+exit 1
+SH
+  cat > "$fake_root/bin/fm-teardown.sh" <<'SH'
+#!/usr/bin/env bash
+set -u
+id=$1
+grep '^alignment_abandon=1$' "$FM_STATE_OVERRIDE/$id.meta" > "$FM_ASSERT_ABANDON"
+rm -f -- "$FM_STATE_OVERRIDE/$id.meta"
+exit 0
+SH
+  chmod +x "$fake_root/bin/fm-spawn.sh" "$fake_root/bin/fm-teardown.sh"
+  out=$(FM_ROOT_OVERRIDE="$fake_root" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    FM_FAKE_TREEHOUSE_HOME="$home" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \
+    FM_ASSERT_ABANDON="$TMP_ROOT/abandon-proof" PATH="$FAKEBIN:$PATH" \
+    "$SESSION" start failed-launch "$PROJECT" 'failed topic' --harness claude 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "failed launch unexpectedly succeeded"
+  assert_present "$TMP_ROOT/abandon-proof" "failed launch did not mark runtime metadata abandoned"
+  assert_absent "$home" "failed launch rollback left the ephemeral home leased"
+  assert_absent "$PARENT/state/failed-launch.alignment" "failed launch left the parent session record"
+  pass "failed alignment launches mark runtime abandonment before teardown rollback"
 }
 
 test_archive_selective_retrieval_supersession_and_promotion() {
@@ -337,6 +381,7 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
 make_parent_and_project
 test_fresh_isolated_sessions_and_parent_archive
 test_project_key_reservation_isolates_same_basename_projects
+test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
 test_teardown_requires_retention_and_abandon_is_explicit
 echo '# all fm-alignment-session tests passed'
