@@ -91,6 +91,15 @@ make_ephemeral_home() {
   printf '%s\n' "$home"
 }
 
+make_same_basename_project() {
+  COLLISION_PROJECT="$TMP_ROOT/other/project"
+  mkdir -p "$COLLISION_PROJECT"
+  printf '# Other fixture project\n' > "$COLLISION_PROJECT/README.md"
+  git -C "$COLLISION_PROJECT" init -q
+  git -C "$COLLISION_PROJECT" add README.md
+  git -C "$COLLISION_PROJECT" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
+}
+
 run_session() {
   local home=$1
   shift
@@ -179,6 +188,18 @@ test_fresh_isolated_sessions_and_parent_archive() {
   assert_grep 'Session: one' "$h1/data/charter.md" "first charter lost its session identity"
   assert_grep 'Session: two' "$h2/data/charter.md" "second charter lost its session identity"
   pass "alignment sessions are fresh, project-scoped, captain-facing, and coexist without persistent registration"
+}
+
+test_project_key_reservation_isolates_same_basename_projects() {
+  local home key_one key_two
+  make_same_basename_project
+  home=$(make_ephemeral_home collision-project)
+  run_session "$home" start collision "$COLLISION_PROJECT" 'collision topic' --harness claude >/dev/null
+  key_one=$(grep '^project_key=' "$PARENT/state/one.alignment" | cut -d= -f2-)
+  key_two=$(grep '^project_key=' "$PARENT/state/collision.alignment" | cut -d= -f2-)
+  [ "$key_one" != "$key_two" ] || fail "same-basename projects reused one archive key"
+  assert_contains "$key_two" 'project-' "colliding project did not receive a deterministic hashed archive key"
+  pass "same-basename project archives reserve and retain distinct deterministic keys"
 }
 
 test_archive_selective_retrieval_supersession_and_promotion() {
@@ -315,6 +336,7 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
 
 make_parent_and_project
 test_fresh_isolated_sessions_and_parent_archive
+test_project_key_reservation_isolates_same_basename_projects
 test_archive_selective_retrieval_supersession_and_promotion
 test_teardown_requires_retention_and_abandon_is_explicit
 echo '# all fm-alignment-session tests passed'

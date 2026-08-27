@@ -155,10 +155,18 @@ project_name_for_path() {
 }
 
 project_key_for_path() {
-  local path=$1 data_root=${2:-$DATA} name root meta existing_path collision=0
+  local path=$1 data_root=${2:-$DATA} name root meta existing_path reserved_path collision=0
   name=$(project_name_for_path "$path")
   root="$data_root/alignments/$name"
   if [ -d "$root" ] && [ ! -L "$root" ]; then
+    if [ -f "$root/.project-path" ] && [ ! -L "$root/.project-path" ]; then
+      reserved_path=$(cat "$root/.project-path")
+      if [ "$reserved_path" = "$path" ]; then
+        printf '%s\n' "$name"
+        return
+      fi
+      [ -z "$reserved_path" ] || collision=1
+    fi
     for meta in "$root"/*/metadata; do
       [ -f "$meta" ] && [ ! -L "$meta" ] || continue
       existing_path=$(read_record_field "$meta" project_path || true)
@@ -304,7 +312,8 @@ write_canonical_context() {
     printf '\n## Historical alignment inventory\n\n'
     printf 'The following metadata-only inventory is deterministic and project-scoped.\n'
     printf 'Do not load every historical report.\nUse the explicit retrieval command only for a relevant session.\n\n'
-    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-alignment-session.sh" inventory "$project" 2>/dev/null || \
+    FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" FM_PROJECTS_OVERRIDE="$PROJECTS" \
+      "$SCRIPT_DIR/fm-alignment-session.sh" inventory "$project" 2>/dev/null || \
       printf 'No retained alignment artifacts exist for this project yet.\n'
   } > "$context"
 }
@@ -430,6 +439,14 @@ start_session() {
   [ ! -L "$DATA" ] && [ ! -L "$STATE" ] || fail "alignment data/state directory must not be a symlink"
   mkdir -p "$DATA" "$STATE"
   lock_dir "$STATE/.alignment-session-$session_id.lock"
+  PROJECT_KEY_LOCK="$STATE/.alignment-project-key.lock"
+  PROJECT_KEY_WAIT=0
+  while ! mkdir "$PROJECT_KEY_LOCK" 2>/dev/null; do
+    PROJECT_KEY_WAIT=$((PROJECT_KEY_WAIT + 1))
+    [ "$PROJECT_KEY_WAIT" -le 3000 ] || fail "another alignment project-key operation is stuck: $PROJECT_KEY_LOCK"
+    sleep 0.01
+  done
+  printf '%s\n' "$$" > "$PROJECT_KEY_LOCK/pid"
   START_HOME_LEASED=0
   START_HOME=
   alignment_start_cleanup() {
@@ -441,6 +458,10 @@ start_session() {
       else
         printf 'alignment-session: treehouse is unavailable while returning failed-start home %s\n' "$START_HOME" >&2
       fi
+    fi
+    if [ -n "${PROJECT_KEY_LOCK:-}" ]; then
+      rm -f -- "$PROJECT_KEY_LOCK/pid"
+      rmdir "$PROJECT_KEY_LOCK" 2>/dev/null || true
     fi
     rmdir "$ALIGNMENT_LOCK" 2>/dev/null || true
     return "$status"
@@ -457,6 +478,21 @@ start_session() {
   SESSION_PROJECT_PATH=$(project_path_resolve "$project_input")
   SESSION_PROJECT_NAME=$(project_name_for_path "$SESSION_PROJECT_PATH")
   SESSION_PROJECT_KEY=$(project_key_for_path "$SESSION_PROJECT_PATH")
+  if [ "$SESSION_PROJECT_KEY" = "$SESSION_PROJECT_NAME" ]; then
+    project_key_root=$(archive_root_for "$SESSION_PROJECT_KEY")
+    safe_dir "$project_key_root"
+    project_key_reservation="$project_key_root/.project-path"
+    if [ -e "$project_key_reservation" ] || [ -L "$project_key_reservation" ]; then
+      [ ! -L "$project_key_reservation" ] || fail "project-key reservation is a symlink: $project_key_reservation"
+      [ "$(cat "$project_key_reservation")" = "$SESSION_PROJECT_PATH" ] \
+        || fail "project-key reservation belongs to another project"
+    else
+      printf '%s\n' "$SESSION_PROJECT_PATH" > "$project_key_reservation"
+    fi
+  fi
+  rm -f -- "$PROJECT_KEY_LOCK/pid"
+  rmdir "$PROJECT_KEY_LOCK"
+  PROJECT_KEY_LOCK=
   if ! field_valid "$SESSION_PROJECT_NAME" || ! field_valid "$SESSION_PROJECT_PATH"; then
     fail "resolved project identity contains a line separator"
   fi
