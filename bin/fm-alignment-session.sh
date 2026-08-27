@@ -6,7 +6,7 @@
 #   fm-alignment-session.sh start <project> <topic> [options]
 #   fm-alignment-session.sh retain <session-id> [report] [--supersedes <id>[,<id>...]] [--outcome <implementation|knowledge-only|both|neither>]
 #   fm-alignment-session.sh inventory <project>
-#   fm-alignment-session.sh retrieve <project> <session-id> [--archive-home <parent-home>]
+#   fm-alignment-session.sh retrieve <project> <session-id> [--archive-home <parent-home>] [--archive-data <data-root>]
 #   fm-alignment-session.sh promote <session-id> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--purpose <implementation|knowledge-only|both>] [--task-id <id>]
 #   fm-alignment-session.sh close <session-id> [--abandon]
 #
@@ -133,6 +133,13 @@ record_set() {
   tmp="$file.tmp.$$"
   awk -F= -v key="$key" '$1 != key' "$file" > "$tmp"
   printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv -f -- "$tmp" "$file"
+}
+
+record_remove() {
+  local file=$1 key=$2 tmp
+  tmp="$file.tmp.$$"
+  awk -F= -v key="$key" '$1 != key' "$file" > "$tmp"
   mv -f -- "$tmp" "$file"
 }
 
@@ -563,7 +570,7 @@ Read the current project at the path above and read \
 \`data/alignment-context.md\` before reasoning.
 The context contains the AGENTS chain, a compact current-document owner index, and a compact historical inventory. Use the index and the project's owner pointers to inspect topic-relevant canonical owners directly before declaring the alignment ready; never silently omit or truncate a required owner.
 Historical report bodies are not loaded automatically; retrieve only a relevant one with this explicit parent-owned command:
-  bin/fm-alignment-session.sh retrieve $project_q $session_q --archive-home $parent_home_q
+  bin/fm-alignment-session.sh retrieve $project_q $session_q --archive-home $parent_home_q --archive-data $(printf '%q' "$DATA")
 
 This session is captain-facing only for this alignment topic.
 It is not a persistent Secondmate, it has no standing authority, and it must not become ordinary implementation work.
@@ -860,7 +867,7 @@ validate_session_identity() {
 }
 
 retain_session() {
-  local current_id report='' supersedes='' outcome='' outcome_set=0 archive_dir archive_meta tmp source_report prior_archive expected_key archive_tmp staged_outcome
+  local current_id report='' supersedes='' outcome='' outcome_set=0 archive_dir archive_meta tmp source_report prior_archive expected_key archive_tmp staged_outcome pending_outcome
   local -a superseded_ids=()
   [ "$#" -ge 1 ] || usage
   require_parent_home
@@ -916,16 +923,21 @@ retain_session() {
     cmp -s "$report" "$archive_dir/report.md" \
       || fail "alignment session $SESSION_ID already has a different retained report"
     SESSION_ARCHIVE="$archive_dir/report.md"
+    pending_outcome=$(read_record_field "$SESSION_RECORD" retain_pending_outcome || true)
     if [ "$outcome_set" -eq 0 ]; then
-      outcome=$(read_record_field "$archive_meta" outcome || true)
-      [ -n "$outcome" ] || outcome=neither
+      case "$pending_outcome" in
+        implementation|knowledge-only|both|neither) outcome=$pending_outcome ;;
+        *) outcome=$(read_record_field "$archive_meta" outcome || true); [ -n "$outcome" ] || outcome=neither ;;
+      esac
     fi
+    record_set "$SESSION_RECORD" retain_pending_outcome "$outcome"
+    record_set "$archive_meta" outcome "$outcome"
     record_set "$SESSION_RECORD" status completed
     record_set "$SESSION_RECORD" archive "$archive_dir/report.md"
     record_set "$SESSION_RECORD" outcome "$outcome"
-    record_set "$archive_meta" outcome "$outcome"
     retained_archive_valid \
       || fail "alignment archive for $SESSION_ID is incomplete or belongs to another project"
+    record_remove "$SESSION_RECORD" retain_pending_outcome
     printf 'retained alignment report %s\n' "$archive_dir/report.md"
     return 0
   fi
@@ -1027,8 +1039,8 @@ inventory_session() {
     status=$(read_record_field "$meta" status || true)
     topic=$(read_record_field "$meta" topic || true)
     supersedes=$(read_record_field "$meta" supersedes || true)
-    printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport=data/alignments/%s/%s/report.md\tretrieve=bin/fm-alignment-session.sh retrieve %q %q --archive-home %q\n' \
-      "$sid" "$topic" "$status" "$supersedes" "$key" "$sid" "$project" "$sid" "$FM_HOME"
+    printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport=data/alignments/%s/%s/report.md\tretrieve=bin/fm-alignment-session.sh retrieve %q %q --archive-home %q --archive-data %q\n' \
+      "$sid" "$topic" "$status" "$supersedes" "$key" "$sid" "$project" "$sid" "$FM_HOME" "$DATA"
     meta_count=$((meta_count + 1))
   done < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name metadata \
     ! -path "$root/.*.tmp/metadata" -print | LC_ALL=C sort)
@@ -1036,7 +1048,7 @@ inventory_session() {
 }
 
 retrieve_session() {
-  local project_input sid project project_name key meta archive report topic outcome archive_home='' archive_data
+  local project_input sid project project_name key meta archive report topic outcome archive_home='' archive_data='' archive_data_set=0
   [ "$#" -ge 2 ] || usage
   project_input=$1
   sid=$2
@@ -1045,18 +1057,23 @@ retrieve_session() {
     case "$1" in
       --archive-home) [ "$#" -ge 2 ] || usage; archive_home=$2; shift 2 ;;
       --archive-home=*) archive_home=${1#--archive-home=}; shift ;;
+      --archive-data) [ "$#" -ge 2 ] || usage; archive_data=$2; archive_data_set=1; shift 2 ;;
+      --archive-data=*) archive_data=${1#--archive-data=}; archive_data_set=1; shift ;;
       *) usage ;;
     esac
   done
   require_parent_home
   project=$(project_path_resolve "$project_input")
-  archive_data=$DATA
   if [ -n "$archive_home" ]; then
     home_is_safe "$archive_home" || fail "archive home is missing or unsafe: $archive_home"
-    archive_data="$archive_home/data"
-    [ ! -L "$archive_data" ] || fail "archive data directory must not be a symlink: $archive_data"
-    [ -d "$archive_data" ] || fail "archive data directory is missing: $archive_data"
+    [ "$archive_data_set" -eq 1 ] || archive_data="$archive_home/data"
+  else
+    [ "$archive_data_set" -eq 0 ] || fail "--archive-data requires --archive-home"
+    archive_data=$DATA
   fi
+  archive_path_safe "$archive_data"
+  [ -d "$archive_data" ] && [ ! -L "$archive_data" ] \
+    || fail "archive data directory is missing or unsafe: $archive_data"
   key=$(project_key_for_path "$project" "$archive_data")
   id_valid "$sid" || fail "invalid alignment session id: $sid"
   meta="$archive_data/alignments/$key/$sid/metadata"

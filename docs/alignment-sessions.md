@@ -8,7 +8,7 @@ The configured alignment harness, model, and effort are read from the captain-pr
 
 The session receives the AGENTS instruction chain and a compact, deterministic index of current documentation owners first, followed by a compact, deterministic metadata inventory of prior alignments. `context-owner:` and `owner-pointer:` declarations in the project AGENTS chain, plus optional project-local pointer files, identify explicit owners before fallback document candidates; candidates are not treated as authoritative. Existing authoritative owners and this owner chain take precedence; no pointer file is required.
 The strong executor lazily inspects relevant indexed owners before declaring readiness. Large required owners remain navigable at their project paths without silent omission or truncation, and audience labels do not determine authority. The inventory contains no historical report bodies, and Firstmate does not semantically rank them.
-The executor may use `bin/fm-alignment-session.sh retrieve <project> <session-id> --archive-home <parent-home>` for one explicitly relevant historical report, using the parent Firstmate home that owns the archive.
+The executor may use `bin/fm-alignment-session.sh retrieve <project> <session-id> --archive-home <parent-home>` for one explicitly relevant historical report, using the parent Firstmate home that owns the archive. When the parent uses a configured alternate data root, the command also passes `--archive-data <parent-data-root>`.
 
 The executor writes a validated report rather than a transcript.
 The report identifies the project, session, topic, source, and the existing alignment sections, followed by a separate durable-knowledge-candidates section.

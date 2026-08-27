@@ -333,6 +333,15 @@ test_archive_selective_retrieval_supersession_and_promotion() {
     "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT")
   assert_contains "$out" 'Domain term candidate.' \
     "explicit parent-owned historical retrieval did not return the selected report"
+  mkdir -p "$TMP_ROOT/custom-data"
+  mv "$PARENT/data/alignments" "$TMP_ROOT/custom-data/alignments"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
+    FM_DATA_OVERRIDE="$h1/data" FM_STATE_OVERRIDE="$h1/state" \
+    "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT" \
+      --archive-data "$TMP_ROOT/custom-data")
+  assert_contains "$out" 'Domain term candidate.' \
+    "retrieval did not preserve the explicitly configured parent archive data root"
+  mv "$TMP_ROOT/custom-data/alignments" "$PARENT/data/alignments"
   assert_contains "$(cat "$h1/data/charter.md")" \
     "bin/fm-alignment-session.sh retrieve $PROJECT one --archive-home $PARENT" \
     "ephemeral charter did not provide the parent archive retrieval boundary"
@@ -400,6 +409,14 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   assert_contains "$out" 'changed since alignment hydration' \
     "stale project promotion did not require reconciliation"
   rm -f "$PROJECT/stale-alignment-input.txt"
+  sed -i 's/^outcome=.*/outcome=knowledge-only/; s/^status=.*/status=running/' \
+    "$PARENT/state/two-promotion.alignment"
+  printf 'retain_pending_outcome=both\n' >> "$PARENT/state/two-promotion.alignment"
+  run_session "$h2" retain two-promotion >/dev/null
+  assert_grep 'outcome=both' "$PARENT/state/two-promotion.alignment" \
+    "idempotent retain did not recover its pending outcome"
+  assert_grep 'outcome=both' "$PARENT/data/alignments/project/two-promotion/metadata" \
+    "idempotent retain did not reconcile pending archive outcome"
 
   local h3="$TMP_ROOT/session-neither"
   h3=$(make_ephemeral_home session-neither)
