@@ -394,7 +394,7 @@ test_archive_symlink_ancestors_are_rejected() {
 }
 
 test_teardown_requires_retention_and_abandon_is_explicit() {
-  local h1 h3 out status
+  local h1 h3 h4 out status
   h1="$TMP_ROOT/session-one"
   h3=$(make_ephemeral_home session-three)
   run_session "$h1" close one >/dev/null || fail "retained session could not be closed"
@@ -431,6 +431,22 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
   [ "$status" -ne 0 ] || fail "unretained session close succeeded without explicit abandonment"
   assert_contains "$out" 'no retained report' "retention refusal did not explain teardown safety"
   assert_present "$PARENT/state/three.meta" "unsafe close removed the live session metadata"
+
+  h4=$(make_ephemeral_home session-four)
+  run_session "$h4" start four "$PROJECT" 'missing owner record' --harness claude >/dev/null
+  printf 'alignment_abandon=1\n' >> "$PARENT/state/four.meta"
+  rm -f "$PARENT/state/four.alignment"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h4" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" four --force 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "direct abandonment cleanup proceeded without a parent session record"
+  assert_contains "$out" 'valid parent session record' \
+    "missing parent session record did not preserve abandonment safety"
+  assert_present "$h4" "missing parent session record allowed leased-home deletion"
+
   rm -f "$h3/data/three/report.md"
   out=$(run_session "$h3" close three --abandon 2>&1)
   assert_contains "$out" 'closed alignment session three' "explicit abandoned close did not complete"

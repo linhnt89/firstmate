@@ -776,6 +776,15 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
   elif [ "$(grep '^alignment_abandon=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != 1 ]; then
     echo "REFUSED: ephemeral alignment $ID has no retained report; close it through fm-alignment-session.sh --abandon or retain it first" >&2
     exit 1
+  elif ! [ -f "$ALIGNMENT_RECORD" ] || [ -L "$ALIGNMENT_RECORD" ] \
+    || [ "$(grep '^session_id=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != "$ID" ] \
+    || [ -z "$ALIGNMENT_PROJECT_NAME" ] || [ -z "$ALIGNMENT_PROJECT_PATH" ] \
+    || [ -z "$ALIGNMENT_PROJECT_KEY" ] || [ -z "$HOME_PATH" ] \
+    || [ "$ALIGNMENT_PROJECT_KEY" != "$ALIGNMENT_DERIVED_PROJECT_KEY" ] \
+    || [ "$(grep '^home=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != "$HOME_PATH" ] \
+    || { [ "$ALIGNMENT_STATUS" != starting ] && [ "$ALIGNMENT_STATUS" != running ]; }; then
+    echo "REFUSED: ephemeral alignment $ID has no valid parent session record for abandonment" >&2
+    exit 1
   fi
 fi
 PUBLIC_FOLLOWUP_HOME=$FM_HOME
