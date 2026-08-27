@@ -390,46 +390,64 @@ canonical_owner_declaration_sources() {
   find "$project" -maxdepth 2 -type f \( \
     -name '.context-owner' -o -name 'context-owner' -o \
     -name '.owner-pointer' -o -name 'owner-pointer' \
-  \) -print
+  \) -print | LC_ALL=C sort
+}
+
+canonical_owner_declarations_from_source() {
+  local project=$1 source=$2 base declarations declaration candidate
+  case "$(basename "$source")" in
+    .context-owner|context-owner|.owner-pointer|owner-pointer)
+      base=$(dirname "$source")
+      declarations=$(awk '/^[[:space:]]*#/ { next } NF { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }' "$source")
+      ;;
+    *)
+      base=$project
+      declarations=$(awk '
+        /^[[:space:]]*(context-owner|context_owner|owner-pointer|owner_pointer)[[:space:]]*[:=]/ {
+          line=$0
+          sub(/^[[:space:]]*(context-owner|context_owner|owner-pointer|owner_pointer)[[:space:]]*[:=][[:space:]]*`?/, "", line)
+          sub(/`?[[:space:]]*$/, "", line)
+          print line
+        }
+      ' "$source")
+      ;;
+  esac
+  while IFS= read -r declaration; do
+    declaration=${declaration#\`}
+    declaration=${declaration%\`}
+    declaration=${declaration%\\)}
+    declaration=${declaration#\\(}
+    [ -n "$declaration" ] || continue
+    case "$declaration" in /*) continue ;; esac
+    printf '%s' "$declaration" | LC_ALL=C grep -Eq '[[:space:],:;()]' && continue
+    candidate="$base/$declaration"
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    candidate=$(CDPATH='' cd -- "$(dirname "$candidate")" 2>/dev/null && pwd -P)/$(basename "$candidate") || continue
+    path_is_ancestor "$project" "$candidate" || [ "$candidate" = "$project" ] || continue
+    canonical_document_is_text "$candidate" || continue
+    printf '%s\n' "$candidate"
+  done <<< "$declarations"
 }
 
 canonical_owner_declarations() {
-  local project=$1 source declaration candidate base declarations
+  local project=$1 source
+  while IFS= read -r source; do
+    canonical_owner_declarations_from_source "$project" "$source"
+  done < <(canonical_owner_declaration_sources "$project")
+}
+
+canonical_owner_declaration_candidates() {
+  local project=$1 source kind
   while IFS= read -r source; do
     case "$(basename "$source")" in
-      .context-owner|context-owner|.owner-pointer|owner-pointer)
-        base=$(dirname "$source")
-        declarations=$(awk '/^[[:space:]]*#/ { next } NF { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }' "$source")
-        ;;
-      *)
-        base=$project
-        declarations=$(awk '
-          /^[[:space:]]*(context-owner|context_owner|owner-pointer|owner_pointer)[[:space:]]*[:=]/ {
-            line=$0
-            sub(/^[[:space:]]*(context-owner|context_owner|owner-pointer|owner_pointer)[[:space:]]*[:=][[:space:]]*`?/, "", line)
-            sub(/`?[[:space:]]*$/, "", line)
-            print line
-          }
-        ' "$source")
-        ;;
+      AGENTS.md) kind=agents ;;
+      .context-owner|context-owner) kind=context ;;
+      .owner-pointer|owner-pointer) kind=pointer ;;
+      *) continue ;;
     esac
-    while IFS= read -r declaration; do
-      declaration=${declaration#\`}
-      declaration=${declaration%\`}
-      declaration=${declaration%\\)}
-      declaration=${declaration#\\(}
-      [ -n "$declaration" ] || continue
-      case "$declaration" in
-        /*) continue ;;
-      esac
-      printf '%s' "$declaration" | LC_ALL=C grep -Eq '[[:space:],:;()]' && continue
-      candidate="$base/$declaration"
-      [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
-      candidate=$(CDPATH='' cd -- "$(dirname "$candidate")" 2>/dev/null && pwd -P)/$(basename "$candidate") || continue
-      path_is_ancestor "$project" "$candidate" || [ "$candidate" = "$project" ] || continue
-      canonical_document_is_text "$candidate" || continue
-      printf '%s\n' "$candidate"
-    done <<< "$declarations"
+    while IFS= read -r candidate; do
+      printf '%s\t%s\t%s\n' "$kind" "$source" "$candidate"
+    done < <(canonical_owner_declarations_from_source "$project" "$source")
   done < <(canonical_owner_declaration_sources "$project")
 }
 
@@ -464,7 +482,24 @@ write_agents_chain() {
 }
 
 write_canonical_context() {
-  local context=$1 project=$2 file relative
+  local context=$1 project=$2 file relative owner_lines selected_source selected_file kind source candidate rank candidate_rank
+  owner_lines=$(canonical_owner_declaration_candidates "$project" | LC_ALL=C awk -F '\t' '!seen[$1 FS $2 FS $3]++')
+  selected_kind= selected_source= selected_file= rank=99
+  while IFS=$'\t' read -r kind source candidate; do
+    [ -n "$candidate" ] || continue
+    case "$kind" in
+      agents) [ "$rank" -le 0 ] && continue; candidate_rank=0 ;;
+      context) [ "$rank" -le 1 ] && continue; candidate_rank=1 ;;
+      pointer) [ "$rank" -le 2 ] && continue; candidate_rank=2 ;;
+      *) continue ;;
+    esac
+    if [ "$candidate_rank" -lt "$rank" ]; then
+      selected_kind=$kind
+      selected_source=$source
+      selected_file=$candidate
+      rank=$candidate_rank
+    fi
+  done <<< "$owner_lines"
   {
     printf '# Alignment session context\n\n'
     printf 'Project: %s\nPath: %s\n\n' "$SESSION_PROJECT_NAME" "$project"
@@ -475,12 +510,23 @@ write_canonical_context() {
     write_agents_chain "$project"
     printf '\n### Current-document owner index\n\n'
     printf 'Entries are metadata only so unrelated or oversized owners cannot exhaust the session context. No owner is copied or truncated; inspect any required owner at its listed project path.\n\n'
-    printf 'Explicit owner declarations (highest precedence):\n'
-    while IFS= read -r file; do
-      relative=${file#"$project"/}
-      printf 'explicit\t%s\t%s bytes\t%s\tread from project path %s\n' \
-        "$relative" "$(wc -c < "$file" | tr -d ' ')" "$(canonical_document_title "$file")" "$file"
-    done < <(canonical_owner_declarations "$project" | LC_ALL=C sort -u)
+    printf 'Selected authoritative owner (precedence: AGENTS chain, context-owner/index, owner pointers):\n'
+    if [ -n "$selected_file" ]; then
+      relative=${selected_file#"$project"/}
+      printf 'selected\t%s\t%s bytes\t%s\tdeclared by %s\n' \
+        "$relative" "$(wc -c < "$selected_file" | tr -d ' ')" "$(canonical_document_title "$selected_file")" "$selected_source"
+    else
+      printf 'selected\tnone\tno explicit owner declaration\n'
+    fi
+    printf '\nConflicting owner declarations (not authoritative):\n'
+    if [ -n "$selected_file" ]; then
+      while IFS=$'\t' read -r kind source file; do
+        [ -n "$file" ] && [ "$file" != "$selected_file" ] || continue
+        relative=${file#"$project"/}
+        printf 'conflict\t%s\t%s bytes\t%s\tdeclared by %s (%s precedence)\n' \
+          "$relative" "$(wc -c < "$file" | tr -d ' ')" "$(canonical_document_title "$file")" "$source" "$kind"
+      done <<< "$owner_lines"
+    fi
     printf '\nFallback document candidates (not assumed authoritative):\n'
     while IFS= read -r file; do
       canonical_document_is_text "$file" || continue

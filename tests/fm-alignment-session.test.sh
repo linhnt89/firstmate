@@ -166,8 +166,8 @@ assert_session_identity() {
     "session copied unrelated canonical owner text into its compact context"
   assert_grep $'README.md\t' "$home/data/alignment-context.md" \
     "session omitted the maintained README owner from its index"
-  assert_grep $'explicit\tdocs/domain.md\t' "$home/data/alignment-context.md" \
-    "session did not prioritize the declared canonical documentation owner"
+  assert_grep $'selected\tdocs/domain.md\t' "$home/data/alignment-context.md" \
+    "session did not select the declared canonical documentation owner"
   assert_grep $'candidate\tREADME.md\t' "$home/data/alignment-context.md" \
     "session did not distinguish fallback documentation candidates from owners"
   assert_grep $'docs/oversized.md\t' "$home/data/alignment-context.md" \
@@ -514,6 +514,25 @@ test_teardown_rejects_symlinked_data_root() {
   pass "direct teardown rejects a symlinked data root"
 }
 
+test_owner_precedence_resolves_conflicts() {
+  local home
+  printf '# Context owner\n' > "$PROJECT/docs/context-owner.md"
+  printf '# Pointer owner\n' > "$PROJECT/docs/pointer-owner.md"
+  printf 'docs/context-owner.md\n' > "$PROJECT/context-owner"
+  printf 'docs/pointer-owner.md\n' > "$PROJECT/owner-pointer"
+  home=$(make_ephemeral_home owner-precedence)
+  run_session "$home" start owner-precedence "$PROJECT" 'owner precedence' --harness claude >/dev/null
+  assert_grep $'selected\tdocs/domain.md\t' "$home/data/alignment-context.md" \
+    "AGENTS owner did not outrank explicit owner declarations"
+  assert_grep $'conflict\tdocs/context-owner.md\t' "$home/data/alignment-context.md" \
+    "context-owner conflict was not surfaced"
+  assert_grep $'conflict\tdocs/pointer-owner.md\t' "$home/data/alignment-context.md" \
+    "owner-pointer conflict was not surfaced"
+  rm -f "$PROJECT/context-owner" "$PROJECT/owner-pointer" \
+    "$PROJECT/docs/context-owner.md" "$PROJECT/docs/pointer-owner.md"
+  pass "alignment owner precedence selects authority and surfaces conflicts"
+}
+
 test_teardown_requires_retention_and_abandon_is_explicit() {
   local h1 h3 h4 out status
   h1="$TMP_ROOT/session-one"
@@ -587,4 +606,5 @@ test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_rejects_symlinked_data_root
 test_teardown_requires_retention_and_abandon_is_explicit
+test_owner_precedence_resolves_conflicts
 echo '# all fm-alignment-session tests passed'
