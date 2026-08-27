@@ -239,7 +239,7 @@ $PROJECT_CLONES_NOTE
 Delegate project work to your own crewmates with the normal firstmate lifecycle: brief, spawn, status, watcher, steer, teardown, and recovery.
 Do not invent a second delegation system.
 You do not generate your own work.
-Act only on tasks the main firstmate routes to you.
+Act only on tasks the main firstmate routes to you, except for the narrow captain-initiated alignment session described below.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
 
 # Requests from the main firstmate
@@ -252,7 +252,9 @@ Optional helper: \`bin/fm-secondmate-report.sh\` can append a correlated status 
 For a terse result, a status line is the whole answer.
 For a detailed answer (an investigation, a plan, an audit), write it to a doc under your home's \`data/\` and append a status line that points to that doc - the scout-report pattern - so the main firstmate is woken and can read it.
 Before treating an investigation or visual review as complete, load \`captain-hold-lifecycle\` from this home's \`.agents/skills/\` and pass its shared completion gate.
-A message with NO marker is the captain typing directly into your pane: treat it as authoritative captain intervention and stay conversational exactly as you would for any captain message; do not force it onto the status path.
+A message with NO marker is unmarked direct input. Only when the captain explicitly initiates this Secondmate's focused pre-implementation alignment session may you converse directly, and that alignment must remain within this charter's registered scope.
+Do not treat an unmarked message as authorization for ordinary implementation, a survey, an audit, or any self-directed work; ordinary implementation remains routed through the main firstmate.
+For direct alignment, use the local report and completion commands in the pre-implementation alignment section below, not a detailed status transcript through the main firstmate.
 A request arriving through the instruction inbox below follows the same marker and reply rules.
 
 # Pre-implementation alignment

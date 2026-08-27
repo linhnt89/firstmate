@@ -117,12 +117,14 @@ META_LOCK_HELD=1
 grep -qx 'kind=scout' "$META" || { echo "error: task $ID is not a scout task (kind=scout not in meta)" >&2; exit 1; }
 
 BRIEF="$FM_HOME/data/$ID/brief.md"
-if [ -e "$BRIEF" ] || [ -L "$BRIEF" ]; then
-  "$FM_ROOT/bin/fm-alignment.sh" check "$BRIEF" --promotion || {
-    echo "error: alignment barrier refused promotion of $ID; explicitly classify or complete the pre-implementation alignment before starting implementation" >&2
-    exit 1
-  }
-fi
+[ -f "$BRIEF" ] && [ ! -L "$BRIEF" ] || {
+  echo "error: alignment barrier refused promotion of $ID; the scout brief is missing, so record an explicit bypassed or complete alignment classification before implementation" >&2
+  exit 1
+}
+"$FM_ROOT/bin/fm-alignment.sh" check "$BRIEF" --promotion || {
+  echo "error: alignment barrier refused promotion of $ID; explicitly classify or complete the pre-implementation alignment before starting implementation" >&2
+  exit 1
+}
 
 TMP="$STATE/.$ID.meta.promote.${BASHPID:-$$}"
 grep -v -e '^kind=' -e '^mode=' -e '^yolo=' "$META" > "$TMP"

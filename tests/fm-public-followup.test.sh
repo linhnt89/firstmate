@@ -2144,6 +2144,9 @@ test_secondmate_promotion_uses_teardown_parent_resolution() {
   parent=$(make_home promote-parent)
   stale=$(make_home promote-stale-parent)
   child=$(make_home promote-child relay-off)
+  mkdir -p "$child/data/promote-conflict" "$child/data/promote-legacy"
+  printf '# Scout\nAlignment contract: bypassed\n' > "$child/data/promote-conflict/brief.md"
+  printf '# Scout\nAlignment contract: bypassed\n' > "$child/data/promote-legacy/brief.md"
   printf '%s\n' mate > "$child/.fm-secondmate-home"
   printf 'schema=fm-secondmate-parent.v1\nroute=local\nparent_home=%s\n' \
     "$stale" > "$child/.fm-secondmate-parent"
@@ -2184,6 +2187,8 @@ test_secondmate_promotion_uses_teardown_parent_resolution() {
     "legacy parent recovery must print the rechain hint"
 
   remote_child=$(make_home promote-remote-child relay-off)
+  mkdir -p "$remote_child/data/promote-remote"
+  printf '# Scout\nAlignment contract: bypassed\n' > "$remote_child/data/promote-remote/brief.md"
   printf '%s\n' remote-mate > "$remote_child/.fm-secondmate-home"
   printf 'schema=fm-secondmate-parent.v1\nroute=remote\nparent_host=remote.example\n' \
     > "$remote_child/.fm-secondmate-parent"

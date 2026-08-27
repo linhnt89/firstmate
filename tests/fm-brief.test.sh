@@ -592,6 +592,14 @@ test_secondmate_marked_request_reporting_contract() {
     "secondmate charter did not preserve the uncorrelated direct parent route"
   assert_grep 'do not relay that detailed conversation' "$brief" \
     "secondmate charter did not preserve direct-captain alignment privacy"
+  assert_grep 'Only when the captain explicitly initiates this Secondmate' "$brief" \
+    "secondmate charter widened the direct-captain exception beyond explicit alignment initiation"
+  assert_grep 'ordinary implementation remains routed through the main firstmate' "$brief" \
+    "secondmate charter allowed direct captain input to create ordinary implementation work"
+  assert_grep 'Ordinary crewmates never address the captain.' "$ROOT/AGENTS.md" \
+    "AGENTS.md lost the ordinary-crewmate captain boundary"
+  assert_grep 'A persistent Secondmate is the narrow exception' "$ROOT/AGENTS.md" \
+    "AGENTS.md lost the explicit Secondmate alignment exception"
   assert_grep 'States: working, needs-decision, blocked, paused, done, failed.' "$brief" \
     "secondmate charter changed the preserved status vocabulary"
   pass "fm-brief.sh: marked requests avoid generic acknowledgements and preserve material reporting"

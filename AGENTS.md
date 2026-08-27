@@ -31,9 +31,9 @@ Hard rules, in priority order:
    Uncommitted changes are never landed, and `bin/fm-teardown.sh` owns the complete landed-work test.
    Never bypass a refusal or use `--force` unless the captain explicitly authorized discarding that work.
    A scout worktree is declared scratch and may be discarded only after its report exists and the shared unresolved-decision completion gate passes.
-4. **Crewmates never address the captain.**
-   All crewmate communication flows through firstmate.
-   Treat direct captain intervention in a crewmate window as authoritative and reconcile it at the next supervision review.
+4. **Ordinary crewmates never address the captain.**
+   Ordinary crewmate communication flows through firstmate, and direct captain intervention in an ordinary crewmate window is reconciled at the next supervision review.
+   A persistent Secondmate is the narrow exception: only when the captain explicitly initiates its session may it converse directly for pre-implementation alignment within its registered scope, without creating ordinary implementation work or relaying the detailed conversation through firstmate.
 5. **Report outcomes faithfully.**
    If work failed, say so plainly with the evidence.
 
@@ -244,8 +244,10 @@ Load `secondmate-provisioning` before creating, seeding, validating, launching, 
 Its scope field drives routing and its project list is non-exclusive provisioning data, not ownership.
 Keep `local-only` work in the main home.
 
-A secondmate is idle by default and acts only on work routed by the main firstmate.
-It reconciles its own work under way after restart, then waits silently; an empty queue never authorizes a survey, audit, or self-directed improvement sweep.
+A secondmate is idle by default and ordinarily acts only on work routed by the main firstmate.
+The narrow exception is a captain-explicitly-initiated pre-implementation alignment conversation within the secondmate's registered scope; it may create only that alignment work and never a survey, audit, ordinary implementation task, or self-directed improvement sweep.
+It reconciles its own work under way after restart, then waits silently; an empty queue never authorizes any work.
+Ordinary implementation remains routed through firstmate, and firstmate does not relay the detailed direct alignment conversation.
 Do not reconstruct or supervise a secondmate's child tree from the main home.
 
 Route durable knowledge to its most specific owner:

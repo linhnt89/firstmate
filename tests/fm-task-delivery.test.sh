@@ -437,6 +437,8 @@ test_promote_requires_and_records_the_delivery_contract() {
   [ "$status" -ne 0 ] || fail "promotion on a conditional policy should exit non-zero"
   assert_contains "$out" "classify this task's surface" "promote did not refuse the conditional policy as a task mode"
 
+  mkdir -p "$home/data/promote-d1"
+  printf '# Scout\nAlignment contract: bypassed\n' > "$home/data/promote-d1/brief.md"
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" promote-d1 --mode direct-PR --yolo on 2>&1)
   status=$?
   expect_code 0 "$status" "a promotion carrying both flags should succeed"
@@ -456,6 +458,14 @@ $rec
 EOF
   meta="$home/state/promote-unclassified.meta"
   printf 'window=fm-promote-unclassified\nkind=scout\nworktree=/tmp/wt\n' > "$meta"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" promote-unclassified \
+    --mode direct-PR --yolo off 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "promotion with a missing scout brief should be refused"
+  assert_contains "$out" "scout brief is missing" \
+    "missing scout brief refusal did not identify the missing classification source"
+  assert_grep 'kind=scout' "$meta" "missing-brief refusal changed the scout kind"
+
   FM_HOME="$home" "$ROOT/bin/fm-brief.sh" promote-unclassified proj --scout >/dev/null 2>&1 \
     || fail "scout scaffold for promotion classification should succeed"
   brief="$home/data/promote-unclassified/brief.md"
