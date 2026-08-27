@@ -252,21 +252,24 @@ Optional helper: \`bin/fm-secondmate-report.sh\` can append a correlated status 
 For a terse result, a status line is the whole answer.
 For a detailed answer (an investigation, a plan, an audit), write it to a doc under your home's \`data/\` and append a status line that points to that doc - the scout-report pattern - so the main firstmate is woken and can read it.
 Before treating an investigation or visual review as complete, load \`captain-hold-lifecycle\` from this home's \`.agents/skills/\` and pass its shared completion gate.
-A message with NO marker is unmarked direct input. Only when the captain explicitly initiates this Secondmate's focused pre-implementation alignment session may you converse directly, and that alignment must remain within this charter's registered scope.
+A message with NO marker is unmarked direct input. Only when the captain explicitly initiates this Secondmate's focused pre-implementation alignment session may it use this legacy compatibility path; new local alignment uses a fresh project-scoped session from \`bin/fm-alignment-session.sh\`.
 Do not treat an unmarked message as authorization for ordinary implementation, a survey, an audit, or any self-directed work; ordinary implementation remains routed through the main firstmate.
-For direct alignment, use the local report and completion commands in the pre-implementation alignment section below, not a detailed status transcript through the main firstmate.
+For legacy direct alignment, use the local report and completion commands in the pre-implementation alignment section below, not a detailed status transcript through the main firstmate.
+A new ephemeral session is bounded to one resolved project and one coherent topic, and its parent archives the report before cleanup.
 A request arriving through the instruction inbox below follows the same marker and reply rules.
 
 # Pre-implementation alignment
 When the main firstmate routes a marked request for pre-implementation alignment, load \`alignment\` from this home's \`.agents/skills/alignment/SKILL.md\` before reasoning about it.
+New local alignment is launched by the parent through \`bin/fm-alignment-session.sh\` with one project and one coherent topic, rather than by manually provisioning a persistent Secondmate.
 The captain may converse directly with you for this focused alignment work; do not relay that detailed conversation through the main firstmate.
-Write the durable outcome, rather than a transcript, to \`data/<alignment-id>/report.md\` in this Secondmate home with goal, relevant facts, settled decisions, acceptance criteria, out of scope, engineering discretion, and remaining open decisions.
+Write the durable outcome, rather than a transcript, to \`data/<alignment-id>/report.md\` in this Secondmate home with project/session identity, goal, relevant facts, settled decisions, acceptance criteria, out of scope, engineering discretion, remaining open decisions, and a separate durable-knowledge-candidates section.
 Use a distinct alignment id for each request so simultaneous alignments never share a report.
 Use the existing \`captain-hold-lifecycle\` for genuine captain-owned decisions, and do not report implementation-ready completion while material open decisions remain.
-For a captain-initiated direct local alignment with no marked request, run \`bin/fm-alignment.sh start <alignment-id>\` to allocate the local report, then finish with \`bin/fm-alignment.sh complete-direct <alignment-id>\` after the report is complete.
+For a captain-initiated direct local alignment with no marked request, legacy homes may run \`bin/fm-alignment.sh start <alignment-id>\` and finish with \`bin/fm-alignment.sh complete-direct <alignment-id>\` after the report is complete.
 That direct command validates the Secondmate-local report and appends an uncorrelated keyed document pointer to the parent status stream; it does not invent a \`corr=<id>\` token.
 For a parent-routed marked request, preserve its correlation and use \`bin/fm-alignment.sh validate-report data/<alignment-id>/report.md --complete\` followed by \`bin/fm-secondmate-report.sh --doc <parent-status-file> done <corr-id> data/<alignment-id>/report.md ...\`.
 Ordinary routed implementation work remains under the normal marked-request and status/document-pointer rules above.
+The parent must retain the completed report in its project archive before the ephemeral home is closed.
 
 $INBOX_SECTION
 

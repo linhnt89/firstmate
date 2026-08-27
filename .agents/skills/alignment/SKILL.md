@@ -43,56 +43,37 @@ Expose assumptions that affect the outcome, identify meaningful alternatives, an
 Keep asking or investigating only while an unresolved material choice could change the implementation contract.
 Do not turn settled decisions into fresh questions merely to complete a checklist.
 
-## Local Secondmate path
+## Local alignment session path
 
-Prefer a suitable strong local Secondmate when its natural-language `scope:` fits the request and its configured model and effort are appropriate for the reasoning class.
-Use the existing secondmate routing, harness, model, effort, parent binding, and marked-request machinery.
-Do not create one Secondmate per project, add a provider setting, or make an ordinary implementation crewmate captain-facing.
+For local alignment, Firstmate resolves exactly one project and one coherent topic, then runs `bin/fm-alignment-session.sh start` to lease a fresh isolated session.
+The session uses the locally configured alignment harness, model, and effort, and is not entered in `data/secondmates.md` as a persistent Secondmate.
+The captain may converse directly with that one ephemeral executor for that one topic only.
+Firstmate owns routing, archive retention, and cleanup, but must not relay or reconstruct the detailed conversation.
+Ordinary implementation crewmates remain non-captain-facing.
 
-The captain may converse directly with the selected local Secondmate for the focused alignment session.
-Firstmate owns routing and lifecycle, but must not relay the detailed captain/executor conversation or reconstruct it from chat history.
-A marked request from Firstmate must still use the Secondmate's parent status or document-pointer return channel and preserve its correlation.
-For a captain-initiated direct local session, the Secondmate runs `bin/fm-alignment.sh start [<alignment-id>]`, writes the outcome in its own `data/<alignment-id>/report.md`, and runs `bin/fm-alignment.sh complete-direct <alignment-id>` when ready.
-That command resolves the seeded local parent, validates the report, and writes an uncorrelated keyed document pointer; it never fabricates a `corr=<id>` token.
+The session charter contains the current project knowledge first and a compact deterministic inventory of retained alignment metadata second.
+It does not load every historical report, and Firstmate does not rank report bodies semantically.
+The executor may explicitly retrieve one relevant historical report with `bin/fm-alignment-session.sh retrieve <project> <session-id>`.
+The session can read the resolved project's repository and documentation, but its charter forbids project edits, commits, pushes, and direct knowledge promotion.
 
-The local executor writes the outcome, not a transcript, to its own home at `data/<id>/report.md`.
-The completed report must contain exactly these semantic sections, with a meaningful body in each:
+The executor writes the outcome, never a transcript, to `data/<session-id>/report.md`.
+A session report must include project identity, alignment identity and topic, the seven existing semantic sections, and a separate `Durable-knowledge candidates` section.
+Before completion, it runs `bin/fm-alignment.sh validate-report <report> --complete --session <id> --project <name>` and passes `captain-hold-lifecycle`'s completion gate for every genuine captain-owned decision.
+The final open-decision section must explicitly say `None - no material open decisions remain.`.
 
-```markdown
-# Pre-implementation alignment
+The executor then uses the existing uncorrelated `complete-direct` pointer for a direct local session, or the existing correlated `fm-secondmate-report.sh --doc` route for a marked request.
+The parent runs `bin/fm-alignment-session.sh retain <session-id>` and must durably copy the validated report into its project archive before cleanup.
+`inventory` reads archive metadata only, while `retrieve` is the explicit body-read operation.
 
-## Goal
-...
-
-## Relevant facts
-...
-
-## Settled decisions
-...
-
-## Acceptance criteria
-...
-
-## Out of scope
-...
-
-## Engineering discretion
-...
-
-## Remaining open decisions
-None - no material open decisions remain.
-```
-
-A report may retain open decisions while the conversation is in progress.
-Before claiming implementation-ready completion, run `bin/fm-alignment.sh validate-report <report> --complete` and pass `captain-hold-lifecycle`'s completion gate for every genuine captain-owned decision.
-The completed report's final section must explicitly state that no material open decisions remain.
-
-When parent-routed alignment reaches implementation-ready completion, notify the parent with the existing correlated report path.
-Use `bin/fm-secondmate-report.sh --doc <parent-status-file> done <corr-id> <report-path> ...` or the equivalent parent status contract, and preserve the exact `corr=<id>` token.
-For a direct captain-initiated local alignment, `complete-direct` uses the existing parent status/document-pointer stream with a keyed uncorrelated line; the parent consumes the durable report pointer and never needs the Secondmate's chat transcript.
+A later report may pass `--supersedes <session-id>` to `retain`.
+The earlier report remains immutable historical evidence, while any current-knowledge or ADR change is only a candidate until Firstmate routes a normal authorized project task.
+Use `bin/fm-alignment-session.sh promote` to compile the accepted outcome into an ordinary ship brief; it never writes project documentation or launches a captain-facing implementation worker.
 
 If the captain owns a remaining choice, use `bin/fm-captain-hold.sh hold` in the home that owns the work, report the keyed decision, and stop the alignment completion path until the captain's actual answer is recorded.
 Do not report a complete alignment while a material captain-held decision remains open.
+
+Already-provisioned persistent Secondmates retain the legacy `bin/fm-alignment.sh start` and `complete-direct` compatibility path for in-flight work only.
+New local alignment intake must use the fresh session path above rather than assuming or provisioning a persistent Secondmate.
 
 ## External specialist path
 
@@ -124,4 +105,4 @@ If implementation discovers a new material contradiction or decision that the al
 A mechanical implementation detail that does not change the aligned outcome remains the worker's engineering discretion.
 
 Do not add a parallel alignment database, provider configuration, state store, or worker kind.
-Use the existing brief, Secondmate-local report, GitHub handoff issue, backlog, status/document-pointer, and captain-hold primitives.
+Use the existing brief, parent-owned alignment archive, GitHub handoff issue, backlog, status/document-pointer, and captain-hold primitives.

@@ -47,9 +47,11 @@
 # Projected closes share the presentation-order lock, refuse to close the
 # captain's active tab, and restore the exact response-derived pre-close tab
 # if Herdr's last-pane cleanup focuses an unrelated neighboring workspace.
-# Secondmates (kind=secondmate in meta) are retired explicitly. Normal
-# teardown refuses while their home has in-flight crewmate meta files; --force
-# is the approved discard path that prevalidates child removal targets, locks each
+# Secondmates (kind=secondmate in meta) are retired explicitly. An ephemeral
+# alignment session is the parent-owned, unregistered kind=secondmate variant;
+# fm-alignment-session.sh proves its archive before calling this normal cleanup
+# path. Normal teardown refuses while their home has in-flight crewmate meta
+# files; --force is the approved discard path that prevalidates child removal targets, locks each
 # descendant home's task set before enumeration, and holds those locks through
 # child cleanup. Contention refuses the complete forced teardown before child
 # mutation. Local and remote retirement serialize their destructive phase with
@@ -696,8 +698,28 @@ ORCA_PATH_MATCH_VERIFIED=0
 
 KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
 [ -n "$KIND" ] || KIND=ship
+ALIGNMENT_SESSION=$(grep '^alignment_session=' "$META" | tail -1 | cut -d= -f2- || true)
 MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
+if [ "$ALIGNMENT_SESSION" = 1 ] && [ "$FORCE" != "--force" ]; then
+  ALIGNMENT_RECORD="$STATE/$ID.alignment"
+  ALIGNMENT_STATUS=$(grep '^status=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_ARCHIVE=$(grep '^archive=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_PROJECT_KEY=$(grep '^project_key=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_EXPECTED_ARCHIVE="$DATA/alignments/$ALIGNMENT_PROJECT_KEY/$ID/report.md"
+  if [ "$ALIGNMENT_STATUS" = completed ]; then
+    [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] \
+      && [ -f "$ALIGNMENT_ARCHIVE" ] && [ ! -L "$ALIGNMENT_ARCHIVE" ] \
+      && [ -f "${ALIGNMENT_ARCHIVE%/report.md}/metadata" ] \
+      && [ ! -L "${ALIGNMENT_ARCHIVE%/report.md}/metadata" ] || {
+        echo "REFUSED: ephemeral alignment $ID has no valid parent-owned archive; retain the report before cleanup" >&2
+        exit 1
+      }
+  elif [ "$(grep '^alignment_abandon=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != 1 ]; then
+    echo "REFUSED: ephemeral alignment $ID has no retained report; close it through fm-alignment-session.sh --abandon or retain it first" >&2
+    exit 1
+  fi
+fi
 PUBLIC_FOLLOWUP_HOME=$FM_HOME
 PUBLIC_FOLLOWUP_STATE=$STATE
 PUBLIC_FOLLOWUP_WORK_HOME=main
@@ -725,7 +747,16 @@ public_followup_resolve_primary_home() {
   secondmate_registry_validate_bindings "$registry" secondmate_registry_path_key "$id" "$child" || return 1
   printf '%s\n' "$parent"
 }
-if [ -f "$FM_HOME/$SUB_HOME_MARKER" ]; then
+if [ "$ALIGNMENT_SESSION" = 1 ]; then
+  # An ephemeral alignment is intentionally not in data/secondmates.md and has
+  # no Relay promise of its own. Its parent archive is checked by
+  # fm-alignment-session.sh before this normal cleanup path is called.
+  PUBLIC_FOLLOWUP_HOME=
+  PUBLIC_FOLLOWUP_STATE=
+  PUBLIC_FOLLOWUP_PARENT_UNRESOLVED=0
+  PUBLIC_FOLLOWUP_PARENT_RELAY_ACTIVE=0
+  PUBLIC_FOLLOWUP_RELAY_ACTIVE=0
+elif [ -f "$FM_HOME/$SUB_HOME_MARKER" ]; then
   SECOND_MATE_ID=$(sed -n '1p' "$FM_HOME/$SUB_HOME_MARKER")
   # The durable parent record (written once at seeding, next to the identity
   # marker) names this home's route to its parent: "local" when they share a
@@ -1985,7 +2016,8 @@ validate_firstmate_home_for_removal() {
       echo "REFUSED: unsafe $label removal target $home is marked for secondmate ${marker_id:-unknown}, expected $expected_id" >&2
       return 1
     fi
-    if [ -e "$SECONDMATE_REG" ] || [ -L "$SECONDMATE_REG" ]; then
+    if [ "${ALIGNMENT_SESSION:-0}" != 1 ] \
+      && { [ -e "$SECONDMATE_REG" ] || [ -L "$SECONDMATE_REG" ]; }; then
       if ! secondmate_registry_validate_bindings "$SECONDMATE_REG" secondmate_registry_path_key "$expected_id" "$abs_home_path"; then
         case "$SECONDMATE_REGISTRY_ERROR" in
           overlapping\ secondmate\ home\ assignment:*)
@@ -2857,7 +2889,9 @@ if [ "$KIND" = secondmate ]; then
   fi
   handoff_wake_retire_stage_commit \
     || { echo "error: receiver wake cleanup failed; preserving the secondmate route for retry" >&2; exit 1; }
-  remove_secondmate_registry_entry "$ID"
+  if [ "$ALIGNMENT_SESSION" != 1 ]; then
+    remove_secondmate_registry_entry "$ID"
+  fi
 fi
 remove_grok_turnend_auth "$STATE" "$ID" || exit 1
 remove_kimi_turnend_auth "$STATE" "$ID" || exit 1
