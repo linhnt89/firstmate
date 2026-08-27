@@ -701,7 +701,7 @@ KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
 ALIGNMENT_SESSION=$(grep '^alignment_session=' "$META" | tail -1 | cut -d= -f2- || true)
 MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
-if [ "$ALIGNMENT_SESSION" = 1 ] && [ "$FORCE" != "--force" ]; then
+if [ "$ALIGNMENT_SESSION" = 1 ]; then
   ALIGNMENT_RECORD="$STATE/$ID.alignment"
   ALIGNMENT_STATUS=$(grep '^status=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_ARCHIVE=$(grep '^archive=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
