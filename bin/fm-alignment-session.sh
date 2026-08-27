@@ -253,7 +253,9 @@ project_unchanged() {
 }
 
 retained_archive_valid() {
-  local expected_dir expected_report meta
+  local expected_dir expected_report meta expected_key
+  expected_key=$(project_key_for_path "$SESSION_PROJECT_PATH")
+  [ "$SESSION_PROJECT_KEY" = "$expected_key" ] || return 1
   expected_dir=$(archive_dir_for "$SESSION_PROJECT_KEY" "$SESSION_ID")
   archive_path_safe "$expected_dir"
   expected_report="$expected_dir/report.md"
@@ -577,8 +579,11 @@ start_session() {
   printf '%s\n' "$$" > "$PROJECT_KEY_LOCK/pid"
   START_HOME_LEASED=0
   START_HOME=
+  START_PROJECT_KEY_ROOT=
+  START_PROJECT_KEY_RESERVATION=
+  START_PROJECT_KEY_RESERVATION_CREATED=0
   alignment_start_cleanup() {
-    local status=$?
+    local status=$? published_archive=
     if [ "$START_HOME_LEASED" -eq 1 ] && [ -n "$START_HOME" ] && [ -e "$START_HOME" ]; then
       if command -v treehouse >/dev/null 2>&1; then
         (cd "$FM_ROOT" && treehouse return --force "$START_HOME" >/dev/null) \
@@ -586,6 +591,16 @@ start_session() {
       else
         printf 'alignment-session: treehouse is unavailable while returning failed-start home %s\n' "$START_HOME" >&2
       fi
+    fi
+    if [ "$status" -ne 0 ] && [ "$START_PROJECT_KEY_RESERVATION_CREATED" -eq 1 ] \
+      && [ -f "$START_PROJECT_KEY_RESERVATION" ] \
+      && [ ! -L "$START_PROJECT_KEY_RESERVATION" ] \
+      && [ "$(cat "$START_PROJECT_KEY_RESERVATION" 2>/dev/null || true)" = "$SESSION_PROJECT_PATH" ]; then
+      if [ -d "$START_PROJECT_KEY_ROOT" ] && [ ! -L "$START_PROJECT_KEY_ROOT" ]; then
+        published_archive=$(find "$START_PROJECT_KEY_ROOT" -mindepth 2 -maxdepth 2 \
+          -type f -name metadata -print -quit 2>/dev/null || true)
+      fi
+      [ -n "$published_archive" ] || rm -f -- "$START_PROJECT_KEY_RESERVATION"
     fi
     if [ -n "${PROJECT_KEY_LOCK:-}" ]; then
       rm -f -- "$PROJECT_KEY_LOCK/pid"
@@ -607,15 +622,16 @@ start_session() {
   SESSION_PROJECT_NAME=$(project_name_for_path "$SESSION_PROJECT_PATH")
   SESSION_PROJECT_KEY=$(project_key_for_path "$SESSION_PROJECT_PATH")
   if [ "$SESSION_PROJECT_KEY" = "$SESSION_PROJECT_NAME" ]; then
-    project_key_root=$(archive_root_for "$SESSION_PROJECT_KEY")
-    safe_dir "$project_key_root"
-    project_key_reservation="$project_key_root/.project-path"
-    if [ -e "$project_key_reservation" ] || [ -L "$project_key_reservation" ]; then
-      [ ! -L "$project_key_reservation" ] || fail "project-key reservation is a symlink: $project_key_reservation"
-      [ "$(cat "$project_key_reservation")" = "$SESSION_PROJECT_PATH" ] \
+    START_PROJECT_KEY_ROOT=$(archive_root_for "$SESSION_PROJECT_KEY")
+    safe_dir "$START_PROJECT_KEY_ROOT"
+    START_PROJECT_KEY_RESERVATION="$START_PROJECT_KEY_ROOT/.project-path"
+    if [ -e "$START_PROJECT_KEY_RESERVATION" ] || [ -L "$START_PROJECT_KEY_RESERVATION" ]; then
+      [ ! -L "$START_PROJECT_KEY_RESERVATION" ] || fail "project-key reservation is a symlink: $START_PROJECT_KEY_RESERVATION"
+      [ "$(cat "$START_PROJECT_KEY_RESERVATION")" = "$SESSION_PROJECT_PATH" ] \
         || fail "project-key reservation belongs to another project"
     else
-      printf '%s\n' "$SESSION_PROJECT_PATH" > "$project_key_reservation"
+      printf '%s\n' "$SESSION_PROJECT_PATH" > "$START_PROJECT_KEY_RESERVATION"
+      START_PROJECT_KEY_RESERVATION_CREATED=1
     fi
   fi
   rm -f -- "$PROJECT_KEY_LOCK/pid"

@@ -225,6 +225,23 @@ test_project_key_reservation_isolates_same_basename_projects() {
   pass "same-basename project archives reserve and retain distinct deterministic keys"
 }
 
+test_failed_start_removes_owned_project_reservation() {
+  local failed_project home out status
+  failed_project="$TMP_ROOT/failed-reservation-project"
+  mkdir -p "$failed_project"
+  printf '# Failed reservation fixture\n' > "$failed_project/README.md"
+  git -C "$failed_project" init -q
+  git -C "$failed_project" add README.md
+  git -C "$failed_project" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
+  home=$(make_ephemeral_home failed-reservation)
+  out=$(run_session "$home" start failed-reservation "$failed_project" 'failed topic' --harness unknown 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "invalid harness unexpectedly launched"
+  assert_absent "$PARENT/data/alignments/failed-reservation-project/.project-path" \
+    "failed start leaked its project-key reservation"
+  pass "failed alignment starts remove their unused project reservation"
+}
+
 test_failed_launch_marks_runtime_abandoned_before_rollback() {
   local home fake_root out status
   home=$(make_ephemeral_home failed-launch)
@@ -300,6 +317,12 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   mv "$PARENT/data/alignments/substituted/one" "$PARENT/data/alignments/project/one"
   sed -i 's/^project_key=.*/project_key=project/' "$PARENT/state/one.alignment" "$PARENT/data/alignments/project/one/metadata"
   sed -i 's#^archive=.*#archive='$PARENT'/data/alignments/project/one/report.md#' "$PARENT/state/one.alignment"
+  sed -i 's/^project_key=.*/project_key=substituted/' "$PARENT/state/one.alignment"
+  out=$(run_session "$h1" promote one --mode local-only --yolo off --purpose implementation 2>&1)
+  [ "$?" -ne 0 ] || fail "promotion accepted a record with a substituted project key"
+  assert_contains "$out" 'no valid parent-owned archive' \
+    "promotion did not validate the deterministic project archive key"
+  sed -i 's/^project_key=.*/project_key=project/' "$PARENT/state/one.alignment"
   out=$(run_session "$h1" inventory "$PROJECT")
   assert_contains "$out" $'session=one\ttopic=first topic' \
     "inventory did not enumerate the retained project artifact"
@@ -508,6 +531,7 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
 make_parent_and_project
 test_fresh_isolated_sessions_and_parent_archive
 test_project_key_reservation_isolates_same_basename_projects
+test_failed_start_removes_owned_project_reservation
 test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
 test_archive_staging_recovers_atomically
