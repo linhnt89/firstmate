@@ -366,6 +366,33 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   pass "archive discovery is metadata-only, retrieval is selective, supersession preserves history, and promotion stays on the normal project path"
 }
 
+test_archive_symlink_ancestors_are_rejected() {
+  local data escape archive_home out status
+  data="$TMP_ROOT/symlink-data"
+  escape="$TMP_ROOT/archive-escape"
+  archive_home="$TMP_ROOT/symlink-archive-home"
+  mkdir -p "$data" "$escape" "$archive_home/data"
+  ln -s "$escape" "$data/alignments"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    "$SESSION" inventory "$PROJECT" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "inventory followed a symlinked archive ancestor"
+  assert_contains "$out" 'must not contain a symlink' \
+    "inventory did not explain the unsafe archive ancestor"
+  ln -s "$escape" "$archive_home/data/alignments"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    "$SESSION" retrieve "$PROJECT" one --archive-home "$archive_home" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "retrieval followed a symlinked archive ancestor"
+  assert_contains "$out" 'must not contain a symlink' \
+    "retrieval did not reject the unsafe archive ancestor"
+  pass "archive inventory and retrieval reject symlinked parent ancestors"
+}
+
 test_teardown_requires_retention_and_abandon_is_explicit() {
   local h1 h3 out status
   h1="$TMP_ROOT/session-one"
@@ -417,5 +444,6 @@ test_fresh_isolated_sessions_and_parent_archive
 test_project_key_reservation_isolates_same_basename_projects
 test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
+test_archive_symlink_ancestors_are_rejected
 test_teardown_requires_retention_and_abandon_is_explicit
 echo '# all fm-alignment-session tests passed'

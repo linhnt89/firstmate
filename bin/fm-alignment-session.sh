@@ -94,9 +94,18 @@ hash_text() {
   fi
 }
 
+archive_path_safe() {
+  local path=$1 probe=$1
+  case "$path" in /*) ;; *) fail "alignment archive path must be absolute: $path" ;; esac
+  while [ "$probe" != / ]; do
+    [ ! -L "$probe" ] || fail "alignment archive path must not contain a symlink: $probe"
+    probe=$(dirname -- "$probe")
+  done
+}
+
 safe_dir() {
   local dir=$1
-  [ ! -L "$dir" ] || fail "alignment directory must not be a symlink: $dir"
+  archive_path_safe "$dir"
   if [ -e "$dir" ] && [ ! -d "$dir" ]; then
     fail "alignment path is not a directory: $dir"
   fi
@@ -156,6 +165,7 @@ project_name_for_path() {
 
 project_key_for_path() {
   local path=$1 data_root=${2:-$DATA} name root meta existing_path reserved_path collision=0
+  archive_path_safe "$data_root/alignments"
   name=$(project_name_for_path "$path")
   root="$data_root/alignments/$name"
   if [ -d "$root" ] && [ ! -L "$root" ]; then
@@ -688,6 +698,7 @@ retain_session() {
   esac
   validate_session_identity "$report"
   archive_dir=$(archive_dir_for "$SESSION_PROJECT_KEY" "$SESSION_ID")
+  archive_path_safe "$archive_dir"
   safe_dir "$(archive_root_for "$SESSION_PROJECT_KEY")"
   [ ! -e "$archive_dir" ] || [ ! -L "$archive_dir" ] \
     || fail "alignment archive directory is a symlink: $archive_dir"
@@ -765,6 +776,7 @@ inventory_session() {
   path=$(project_name_for_path "$project")
   key=$(project_key_for_path "$project")
   root=$(archive_root_for "$key")
+  archive_path_safe "$root"
   printf 'project=%s\nproject_path=%s\n' "$path" "$project"
   [ ! -L "$root" ] || fail "alignment archive root is a symlink: $root"
   [ -d "$root" ] || {
@@ -811,6 +823,7 @@ retrieve_session() {
   key=$(project_key_for_path "$project" "$archive_data")
   id_valid "$sid" || fail "invalid alignment session id: $sid"
   meta="$archive_data/alignments/$key/$sid/metadata"
+  archive_path_safe "$meta"
   [ -f "$meta" ] && [ ! -L "$meta" ] || fail "no retained alignment $sid for project $project"
   project_name=$(read_record_field "$meta" project_name || true)
   [ "$project_name" = "$(project_name_for_path "$project")" ] \
