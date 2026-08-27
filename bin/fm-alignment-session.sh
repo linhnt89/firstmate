@@ -242,10 +242,29 @@ session_load() {
     || fail "alignment session record for $id is incomplete"
 }
 
+file_content_digest() {
+  local file=$1
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$file" | awk '{print $1}'
+  else
+    shasum -a 256 -- "$file" | awk '{print $1}'
+  fi
+}
+
 project_status_digest() {
-  local project=$1 output
-  output=$(git -C "$project" status --porcelain=v1 2>/dev/null) || return 1
-  hash_text "$output"
+  local project=$1 file digest snapshot
+  snapshot=$(
+    {
+      canonical_owner_declaration_sources "$project"
+      canonical_owner_declarations "$project"
+      canonical_document_paths "$project"
+    } | LC_ALL=C sort -u | while IFS= read -r file; do
+      [ -f "$file" ] && [ ! -L "$file" ] || continue
+      digest=$(file_content_digest "$file") || exit 1
+      printf '%s\t%s\n' "$file" "$digest"
+    done
+  ) || return 1
+  hash_text "$snapshot"
 }
 
 project_unchanged() {

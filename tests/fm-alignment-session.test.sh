@@ -413,6 +413,25 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   pass "archive discovery is metadata-only, retrieval is selective, supersession preserves history, and promotion stays on the normal project path"
 }
 
+test_promotion_detects_content_changes_to_preexisting_dirty_knowledge() {
+  local home out status original
+  original="$TMP_ROOT/alignment-readme-before"
+  cp "$PROJECT/README.md" "$original"
+  printf '\npreexisting local knowledge change\n' >> "$PROJECT/README.md"
+  home=$(make_ephemeral_home dirty-knowledge)
+  run_session "$home" start dirty-knowledge "$PROJECT" 'dirty knowledge topic' --harness claude >/dev/null
+  printf '\npost-hydration edit to the same dirty owner\n' >> "$PROJECT/README.md"
+  write_report "$home" dirty-knowledge 'dirty knowledge topic'
+  run_session "$home" retain dirty-knowledge >/dev/null
+  out=$(run_session "$home" promote dirty-knowledge --mode local-only --yolo off --purpose implementation 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "promotion accepted a changed preexisting dirty canonical owner"
+  assert_contains "$out" 'changed since alignment hydration' \
+    "promotion did not detect content changes to a preexisting dirty owner"
+  cp "$original" "$PROJECT/README.md"
+  pass "promotion detects content changes to preexisting dirty canonical knowledge"
+}
+
 test_archive_staging_recovers_atomically() {
   local home="$TMP_ROOT/session-staging"
   home=$(make_ephemeral_home session-staging)
@@ -542,6 +561,7 @@ test_project_key_reservation_isolates_same_basename_projects
 test_failed_start_removes_owned_project_reservation
 test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
+test_promotion_detects_content_changes_to_preexisting_dirty_knowledge
 test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_requires_retention_and_abandon_is_explicit
