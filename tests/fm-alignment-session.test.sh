@@ -493,6 +493,27 @@ test_archive_symlink_ancestors_are_rejected() {
   pass "archive inventory and retrieval reject symlinked parent ancestors"
 }
 
+test_teardown_rejects_symlinked_data_root() {
+  local data escape out status
+  data="$PARENT/data"
+  escape="$TMP_ROOT/teardown-data-escape"
+  mkdir -p "$escape"
+  mv "$data" "$escape/data"
+  ln -s "$escape/data" "$data"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$TMP_ROOT/session-one" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "direct cleanup followed a symlinked data root"
+  assert_contains "$out" 'valid parent-owned archive' \
+    "symlinked data root did not preserve teardown safety"
+  rm "$data"
+  mv "$escape/data" "$data"
+  pass "direct teardown rejects a symlinked data root"
+}
+
 test_teardown_requires_retention_and_abandon_is_explicit() {
   local h1 h3 h4 out status
   h1="$TMP_ROOT/session-one"
@@ -564,5 +585,6 @@ test_archive_selective_retrieval_supersession_and_promotion
 test_promotion_detects_content_changes_to_preexisting_dirty_knowledge
 test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
+test_teardown_rejects_symlinked_data_root
 test_teardown_requires_retention_and_abandon_is_explicit
 echo '# all fm-alignment-session tests passed'

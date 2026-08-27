@@ -759,6 +759,7 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
       && [ -n "$ALIGNMENT_PROJECT_KEY" ] \
       && [ "$ALIGNMENT_PROJECT_KEY" = "$ALIGNMENT_DERIVED_PROJECT_KEY" ] \
       && [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] \
+      && [ ! -L "$DATA" ] \
       && [ ! -L "$DATA/alignments" ] \
       && [ ! -L "$DATA/alignments/$ALIGNMENT_PROJECT_KEY" ] \
       && [ ! -L "${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}" ] \
