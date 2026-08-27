@@ -354,44 +354,52 @@ test_archive_selective_retrieval_supersession_and_promotion() {
     "retrieval did not validate the retained report contract"
   mv "$TMP_ROOT/one-report.md" "$PARENT/data/alignments/project/one/report.md"
 
-  write_report "$h2" two 'second topic' 'Superseding domain decision.'
-  run_session "$h2" retain two --supersedes one --outcome both >/dev/null
+  h2=$(make_ephemeral_home session-two-promotion)
+  run_session "$h2" start two-promotion "$PROJECT" 'second topic' --harness claude >/dev/null
+  write_report "$h2" two-promotion 'second topic' 'Superseding domain decision.'
+  run_session "$h2" retain two-promotion --supersedes one --outcome both >/dev/null
   # Simulate a crash after archive publication but before the parent record update.
-  sed -i '/^outcome=/d; s/^status=.*/status=running/' "$PARENT/state/two.alignment"
-  run_session "$h2" retain two >/dev/null
-  assert_grep 'outcome=both' "$PARENT/state/two.alignment" \
+  sed -i '/^outcome=/d; s/^status=.*/status=running/' "$PARENT/state/two-promotion.alignment"
+  run_session "$h2" retain two-promotion >/dev/null
+  assert_grep 'outcome=both' "$PARENT/state/two-promotion.alignment" \
     "idempotent retain did not recover the archived downstream outcome"
-  run_session "$h2" retain two --outcome knowledge-only >/dev/null
-  assert_grep 'outcome=knowledge-only' "$PARENT/state/two.alignment" \
+  run_session "$h2" retain two-promotion --outcome knowledge-only >/dev/null
+  assert_grep 'outcome=knowledge-only' "$PARENT/state/two-promotion.alignment" \
     "explicit idempotent retain did not update the session outcome"
-  assert_grep 'outcome=knowledge-only' "$PARENT/data/alignments/project/two/metadata" \
+  assert_grep 'outcome=knowledge-only' "$PARENT/data/alignments/project/two-promotion/metadata" \
     "explicit idempotent retain left archive outcome metadata stale"
   assert_present "$PARENT/data/alignments/project/one/report.md" \
     "superseded historical report was discarded"
-  assert_present "$PARENT/data/alignments/project/two/report.md" \
+  assert_present "$PARENT/data/alignments/project/two-promotion/report.md" \
     "new superseding report was not archived"
-  assert_grep 'supersedes=one' "$PARENT/data/alignments/project/two/metadata" \
+  assert_grep 'supersedes=one' "$PARENT/data/alignments/project/two-promotion/metadata" \
     "archive did not record explicit supersession"
   out=$(run_session "$h2" inventory "$PROJECT")
   assert_contains "$out" $'session=one\ttopic=first topic' "historical inventory lost the earlier report"
-  assert_contains "$out" $'session=two\ttopic=second topic' "historical inventory lost the superseding report"
+  assert_contains "$out" $'session=two-promotion\ttopic=second topic' "historical inventory lost the superseding report"
 
-  out=$(run_session "$h2" promote two --mode local-only --yolo off --purpose implementation 2>&1)
+  out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose implementation 2>&1)
   [ "$?" -ne 0 ] || fail "promotion reinterpreted a knowledge-only alignment as implementation"
   assert_contains "$out" 'does not authorize implementation promotion' \
     "unauthorized implementation promotion did not explain the retained outcome"
-  out=$(run_session "$h2" promote two --mode local-only --yolo off --purpose knowledge-only)
-  assert_contains "$out" 'created ordinary project follow-up two-followup' \
+  out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only)
+  assert_contains "$out" 'created ordinary project follow-up two-promotion-followup' \
     "knowledge promotion did not create an ordinary project follow-up"
-  brief="$PARENT/data/two-followup/brief.md"
+  brief="$PARENT/data/two-promotion-followup/brief.md"
   assert_present "$brief" "promotion did not create a normal ship brief"
   assert_grep 'Alignment contract: complete' "$brief" "promotion dropped the alignment barrier outcome"
-  assert_grep 'Alignment source: data/alignments/project/two/report.md' "$brief" \
+  assert_grep 'Alignment source: data/alignments/project/two-promotion/report.md' "$brief" \
     "promotion did not point at the parent archive"
   assert_grep 'promote durable-knowledge candidates through the normal project documentation delivery path' "$brief" \
     "promotion bypassed the normal project-write boundary"
   [ -z "$(git -C "$PROJECT" status --porcelain)" ] \
     || fail "alignment promotion wrote project documentation directly"
+  printf 'changed after hydration\n' > "$PROJECT/stale-alignment-input.txt"
+  out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only --task-id stale-followup 2>&1)
+  [ "$?" -ne 0 ] || fail "promotion accepted a project changed after hydration"
+  assert_contains "$out" 'changed since alignment hydration' \
+    "stale project promotion did not require reconciliation"
+  rm -f "$PROJECT/stale-alignment-input.txt"
 
   local h3="$TMP_ROOT/session-neither"
   h3=$(make_ephemeral_home session-neither)

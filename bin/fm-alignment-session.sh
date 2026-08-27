@@ -234,6 +234,9 @@ session_load() {
   SESSION_ARCHIVE=$(read_record_field "$record" archive || true)
   SESSION_HEAD=$(read_record_field "$record" project_head || true)
   SESSION_STATUS_DIGEST=$(read_record_field "$record" project_status_digest || true)
+  SESSION_HYDRATION_HEAD=$(read_record_field "$record" hydration_project_head || true)
+  SESSION_HYDRATION_STATUS_DIGEST=$(read_record_field "$record" hydration_project_status_digest || true)
+  SESSION_HYDRATION_ARCHIVE_DIGEST=$(read_record_field "$record" hydration_archive_inventory_digest || true)
   [ -n "$SESSION_PROJECT_NAME" ] && [ -n "$SESSION_PROJECT_PATH" ] \
     && [ -n "$SESSION_PROJECT_KEY" ] && [ -n "$SESSION_HOME" ] \
     || fail "alignment session record for $id is incomplete"
@@ -250,6 +253,34 @@ project_unchanged() {
   head=$(git -C "$SESSION_PROJECT_PATH" rev-parse HEAD 2>/dev/null || true)
   digest=$(project_status_digest "$SESSION_PROJECT_PATH" || true)
   [ "$head" = "$SESSION_HEAD" ] && [ "$digest" = "$SESSION_STATUS_DIGEST" ]
+}
+
+hydration_archive_inventory_digest() {
+  local project=$1 exclude_session=${2:-} inventory
+  inventory=$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" FM_PROJECTS_OVERRIDE="$PROJECTS" \
+    inventory_session "$project") || return 1
+  if [ -n "$exclude_session" ]; then
+    inventory=$(printf '%s\n' "$inventory" | awk -v sid="$exclude_session" '
+      $1 == "artifacts=0" || $1 ~ /^artifacts=/ { next }
+      index($0, "session=" sid "\t") == 1 { next }
+      { print; if (index($0, "session=") == 1) count++ }
+      END { print "artifacts=" (count + 0) }
+    ')
+  fi
+  hash_text "$inventory"
+}
+
+hydration_snapshot_valid() {
+  local current_head current_status current_inventory
+  [ -n "${SESSION_HYDRATION_HEAD:-}" ] \
+    && [ -n "${SESSION_HYDRATION_STATUS_DIGEST:-}" ] \
+    && [ -n "${SESSION_HYDRATION_ARCHIVE_DIGEST:-}" ] || return 1
+  current_head=$(git -C "$SESSION_PROJECT_PATH" rev-parse HEAD 2>/dev/null || true)
+  current_status=$(project_status_digest "$SESSION_PROJECT_PATH" || true)
+  [ "$current_head" = "$SESSION_HYDRATION_HEAD" ] \
+    && [ "$current_status" = "$SESSION_HYDRATION_STATUS_DIGEST" ] || return 1
+  current_inventory=$(hydration_archive_inventory_digest "$SESSION_PROJECT_PATH" "$SESSION_ID" || true)
+  [ -n "$current_inventory" ] && [ "$current_inventory" = "$SESSION_HYDRATION_ARCHIVE_DIGEST" ]
 }
 
 retained_archive_valid() {
@@ -692,6 +723,12 @@ project_path=$SESSION_PROJECT_PATH
 topic=$topic
 EOF
   write_canonical_context "$SESSION_HOME/data/alignment-context.md" "$SESSION_PROJECT_PATH"
+  SESSION_HYDRATION_HEAD=$(git -C "$SESSION_PROJECT_PATH" rev-parse HEAD) \
+    || fail "could not snapshot the project's hydrated revision"
+  SESSION_HYDRATION_STATUS_DIGEST=$(project_status_digest "$SESSION_PROJECT_PATH") \
+    || fail "could not snapshot the project's hydrated status"
+  SESSION_HYDRATION_ARCHIVE_DIGEST=$(hydration_archive_inventory_digest "$SESSION_PROJECT_PATH" "$SESSION_ID") \
+    || fail "could not snapshot the parent alignment inventory"
   write_session_charter "$SESSION_HOME/data/charter.md" "$SESSION_HOME/data/alignment-context.md"
 
   SESSION_RECORD=$(session_record_path "$session_id")
@@ -707,6 +744,9 @@ status=starting
 source=local
 project_head=$SESSION_HEAD
 project_status_digest=$SESSION_STATUS_DIGEST
+hydration_project_head=$SESSION_HYDRATION_HEAD
+hydration_project_status_digest=$SESSION_HYDRATION_STATUS_DIGEST
+hydration_archive_inventory_digest=$SESSION_HYDRATION_ARCHIVE_DIGEST
 harness=$harness
 model=${model:-default}
 effort=${effort:-default}
@@ -1018,6 +1058,8 @@ promote_session() {
   [ "$SESSION_STATUS" = completed ] || fail "alignment $SESSION_ID must be retained before promotion"
   retained_archive_valid \
     || fail "alignment $SESSION_ID has no valid parent-owned archive"
+  hydration_snapshot_valid \
+    || fail "project or parent alignment inventory changed since alignment hydration; reconcile before promotion"
   outcome=$(read_record_field "$SESSION_RECORD" outcome || true)
   [ -n "$outcome" ] || outcome=neither
   if [ "$purpose_set" -eq 0 ]; then
