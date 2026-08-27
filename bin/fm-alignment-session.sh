@@ -922,7 +922,7 @@ retrieve_session() {
 }
 
 promote_session() {
-  local task_id='' mode='' yolo='' purpose=both purpose_set=0 report brief outcome=neither tmp source_text
+  local task_id='' mode='' yolo='' purpose='' purpose_set=0 report brief outcome=neither tmp source_text
   [ "$#" -ge 1 ] || usage
   require_parent_home
   session_load "$1"
@@ -942,7 +942,9 @@ promote_session() {
   done
   case "$mode" in no-mistakes|direct-PR|local-only) ;; *) fail "promotion requires --mode no-mistakes, direct-PR, or local-only" ;; esac
   case "$yolo" in on|off) ;; *) fail "promotion requires --yolo on or off" ;; esac
-  case "$purpose" in implementation|knowledge-only|both) ;; *) fail "purpose must be implementation, knowledge-only, or both" ;; esac
+  if [ "$purpose_set" -eq 1 ]; then
+    case "$purpose" in implementation|knowledge-only|both) ;; *) fail "purpose must be implementation, knowledge-only, or both" ;; esac
+  fi
   [ "$SESSION_STATUS" = completed ] || fail "alignment $SESSION_ID must be retained before promotion"
   retained_archive_valid \
     || fail "alignment $SESSION_ID has no valid parent-owned archive"
@@ -951,7 +953,12 @@ promote_session() {
   if [ "$purpose_set" -eq 0 ]; then
     case "$outcome" in
       implementation|knowledge-only|both) purpose=$outcome ;;
-      neither) fail "alignment $SESSION_ID has outcome neither; choose an explicit downstream purpose or leave it archived" ;;
+      neither) fail "alignment $SESSION_ID has outcome neither; no downstream promotion is authorized" ;;
+    esac
+  else
+    case "$outcome:$purpose" in
+      implementation:implementation|knowledge-only:knowledge-only|both:implementation|both:knowledge-only|both:both) ;;
+      *) fail "alignment $SESSION_ID outcome $outcome does not authorize $purpose promotion" ;;
     esac
   fi
   [ -n "$task_id" ] || task_id="${SESSION_ID}-followup"

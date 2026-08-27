@@ -353,7 +353,11 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   assert_contains "$out" $'session=one\ttopic=first topic' "historical inventory lost the earlier report"
   assert_contains "$out" $'session=two\ttopic=second topic' "historical inventory lost the superseding report"
 
-  out=$(run_session "$h2" promote two --mode local-only --yolo off --purpose both)
+  out=$(run_session "$h2" promote two --mode local-only --yolo off --purpose implementation 2>&1)
+  [ "$?" -ne 0 ] || fail "promotion reinterpreted a knowledge-only alignment as implementation"
+  assert_contains "$out" 'does not authorize implementation promotion' \
+    "unauthorized implementation promotion did not explain the retained outcome"
+  out=$(run_session "$h2" promote two --mode local-only --yolo off --purpose knowledge-only)
   assert_contains "$out" 'created ordinary project follow-up two-followup' \
     "knowledge promotion did not create an ordinary project follow-up"
   brief="$PARENT/data/two-followup/brief.md"
@@ -365,6 +369,16 @@ test_archive_selective_retrieval_supersession_and_promotion() {
     "promotion bypassed the normal project-write boundary"
   [ -z "$(git -C "$PROJECT" status --porcelain)" ] \
     || fail "alignment promotion wrote project documentation directly"
+
+  local h3="$TMP_ROOT/session-neither"
+  h3=$(make_ephemeral_home session-neither)
+  run_session "$h3" start neither "$PROJECT" 'neither outcome' --harness claude >/dev/null
+  write_report "$h3" neither 'neither outcome'
+  run_session "$h3" retain neither --outcome neither >/dev/null
+  out=$(run_session "$h3" promote neither --mode local-only --yolo off --purpose implementation 2>&1)
+  [ "$?" -ne 0 ] || fail "promotion created work from a neither alignment"
+  assert_contains "$out" 'does not authorize implementation promotion' \
+    "neither outcome did not reject explicit promotion"
   pass "archive discovery is metadata-only, retrieval is selective, supersession preserves history, and promotion stays on the normal project path"
 }
 
