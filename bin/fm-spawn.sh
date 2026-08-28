@@ -1614,14 +1614,15 @@ validate_alignment_session_binding() {
     echo "error: --alignment-session requires a parent-owned alignment session record for $id" >&2
     return 1
   }
-  [ "$(fm_meta_get "$record" schema)" = fm-alignment-session.v1 ] \
+  if [ "$(fm_meta_get "$record" schema)" = fm-alignment-session.v1 ] \
     && [ "$(fm_meta_get "$record" session_id)" = "$id" ] \
     && [ "$(fm_meta_get "$record" source)" = local ] \
-    && case "$(fm_meta_get "$record" status)" in starting|running) true ;; *) false ;; esac \
-    || {
-      echo "error: parent alignment session record for $id is malformed or not launchable" >&2
-      return 1
-    }
+    && case "$(fm_meta_get "$record" status)" in starting|running) true ;; *) false ;; esac; then
+    :
+  else
+    echo "error: parent alignment session record for $id is malformed or not launchable" >&2
+    return 1
+  fi
   abs_home=$(resolved_existing_dir "$home") || return 1
   record_home=$(fm_meta_get "$record" home)
   [ -n "$record_home" ] && [ "$(resolved_existing_dir "$record_home")" = "$abs_home" ] || {
