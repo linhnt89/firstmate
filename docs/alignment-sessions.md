@@ -21,18 +21,21 @@ The executor may use `bin/fm-alignment-session.sh retrieve <project> <session-id
 When the parent uses a configured alternate data root, the command also passes `--archive-data <parent-data-root>`.
 The generic retrieval shape is `bin/fm-alignment-session.sh retrieve <project> <historical-session-id> --archive-home <parent-home> --archive-data <parent-data-root>` after inventory identifies a relevant prior session.
 A fresh launch records an observable launch acknowledgement after the worker endpoint and instructions delivery have been confirmed, but semantic readiness remains pending.
-After inspecting relevant current owners, the executor authenticates a preflight acknowledgement from its bound executor-owned route before it can report substantive readiness or complete the outcome.
-If project knowledge or the historical inventory changes while the outcome is still mutable, run `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context, then require the executor's authenticated reconciliation acknowledgement from that route before retention.
+After inspecting relevant current owners, the executor emits a preflight readiness event from its bound session home through the existing parent status channel before it can report substantive readiness or complete the outcome.
+The event carries the parent-generated readiness epoch, and the parent alone consumes a matching event and folds it into the lifecycle record.
+If project knowledge or the historical inventory changes while the outcome is still mutable, run `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context and advance the readiness epoch, then require the executor to emit a matching reconciliation event before retention.
 A completed immutable outcome freezes its historical-inventory baseline so independent later archives do not make it unpromotable, but canonical project changes or explicit supersession still invalidate promotion.
 A completed immutable outcome cannot be refreshed in place after a later canonical delta; start a revised session and explicitly supersede the earlier report.
 
 The executor writes a validated report rather than a transcript.
 The report identifies the project, session, topic, source, and the existing alignment sections, followed by a separate durable-knowledge-candidates section.
-A direct local executor returns through the existing uncorrelated `bin/fm-alignment.sh complete-direct` pointer.
+A direct local executor returns through the existing uncorrelated `bin/fm-alignment.sh complete-direct` pointer after emitting its current readiness event.
 A marked external or parent-routed request continues to use the existing correlated GitHub handoff and status protocol.
 
 Firstmate retains a completed report with `bin/fm-alignment-session.sh retain` in `data/alignments/<project-key>/<session-id>/` before `close` removes the ephemeral home.
-Archive metadata binds the retained report content digest and the project, session, topic, and archive-key identities before cleanup can proceed.
+Atomic publication of the final archive is the completion commit point, and a retry validates and recovers that archive before checking mutable freshness.
+A staging directory is not completion and remains subject to the mutable reconciliation checks.
+Archive metadata binds the retained report content digest and the project, session, topic, archive-key, and completion-snapshot identities before cleanup can proceed.
 `inventory` enumerates only retained metadata for one project, so historical artifacts are deterministic and project-associated.
 A close without a retained completed report is refused unless Firstmate explicitly closes an abandoned session with `--abandon`.
 Abandonment remains safe even when an incomplete session is stale, retaining non-empty incomplete evidence as an explicitly abandoned, discoverable, non-promotable archive before cleanup; a truly empty scratch session may close without an archive.
@@ -57,7 +60,8 @@ Knowledge promotion therefore receives normal project review, validation, delive
 ## Supersession
 
 A later retained session may name an earlier session with `--supersedes`.
-Before retention, the parent requires the project and archive inventory to match the last executor-acknowledged snapshot.
+Before retention, the parent consumes the matching current-epoch executor event and requires the project and archive inventory to match the resulting accepted snapshot.
+Stale, wrong-session, and replayed events do not advance the parent lifecycle record.
 The earlier report remains unchanged in the archive, while the later report and archive metadata identify the historical relationship.
 Updating current project knowledge is a separate authorized project task and never a direct write from the alignment session.
 

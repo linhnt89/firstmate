@@ -65,18 +65,19 @@ The final open-decision section must explicitly say `None - no material open dec
 
 The executor then uses the existing uncorrelated `complete-direct` pointer for a direct local session, or the existing correlated `fm-secondmate-report.sh --doc` route for a marked request.
 The parent runs `bin/fm-alignment-session.sh retain <session-id>` and must durably copy the validated report into its project archive before cleanup.
-Launch acknowledgement proves endpoint and instructions delivery only, while executor-authenticated preflight acknowledgement separately establishes semantic readiness.
-Retention requires that readiness acknowledgement and the project and archive inventory to match its accepted snapshot.
-For a mutable session, the parent uses `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context, then the bound executor-owned route acknowledges that snapshot before retention; a parent caller cannot synthesize that acknowledgement by copying session identity fields.
+Launch acknowledgement proves endpoint and instructions delivery only, while the executor emits a current-epoch preflight readiness event through the existing parent status channel after inspecting relevant owners.
+The parent alone consumes the matching event and folds it into lifecycle state, and retention requires that accepted readiness plus the project and archive inventory match the current snapshot.
+For a mutable session, the parent uses `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context and advance the readiness epoch, then the executor emits a matching event before retention; stale or replayed events do not satisfy a newer epoch.
 A completed outcome freezes its historical-inventory baseline so an independent later archive does not make it unpromotable, while a canonical project change or explicit supersession invalidates promotion.
 A completed immutable outcome cannot be refreshed in place after a later canonical delta; start a revised session and explicitly supersede the earlier report.
 A non-empty incomplete abandonment is retained as explicitly abandoned historical evidence and cannot authorize implementation, while an empty scratch session may be closed without an archive.
 `inventory` reads archive metadata only, while `retrieve` is the explicit body-read operation.
-A successful fresh launch records an observable launch acknowledgement after endpoint and instructions delivery confirmation, but leaves semantic readiness pending until the executor completes and authenticates its current-owner preflight.
+A successful fresh launch records an observable launch acknowledgement after endpoint and instructions delivery confirmation, but leaves semantic readiness pending until the executor emits its current-epoch owner-preflight event and the parent consumes it.
 
 A later report may pass `--supersedes <session-id>` to `retain`.
 The earlier report remains immutable historical evidence, while any current-knowledge or ADR change is only a candidate until Firstmate routes a normal authorized project task.
 Use `bin/fm-alignment-session.sh promote` to compile the accepted outcome into an ordinary ship brief; it never writes project documentation or launches a captain-facing implementation worker.
+The existing executor-to-parent status/return channel remains the only readiness event transport, and the parent lifecycle record is the only folded readiness state.
 
 If the captain owns a remaining choice, use `bin/fm-captain-hold.sh hold` in the home that owns the work, report the keyed decision, and stop the alignment completion path until the captain's actual answer is recorded.
 Do not report a complete alignment while a material captain-held decision remains open.

@@ -311,7 +311,7 @@ For Pi and pi-signed secondmate launches, `fm-spawn.sh` starts the selected exec
 Its first non-empty, non-comment line is `<harness> [<model>] [<effort>]`, and the values are passed only to that ephemeral captain-facing session.
 A missing file uses the current Firstmate harness without consulting the persistent Secondmate setting, while a configured model or effort remains local configuration and is never copied into tracked policy.
 The selected harness must be one of the verified alignment-capable adapters accepted by `fm-spawn.sh`.
-Use `bin/fm-alignment-session.sh start` to resolve one project and one topic, and use its `acknowledge`, `reconcile`, `retain`, `inventory`, `retrieve`, `promote`, and `close` commands for the rest of the lifecycle.
+Use `bin/fm-alignment-session.sh start` to resolve one project and one topic, and use its `emit-ready`, `reconcile`, `retain`, `inventory`, `retrieve`, `promote`, and `close` commands for the rest of the lifecycle.
 The session archive and knowledge-layer distinction are documented in [`alignment-sessions.md`](alignment-sessions.md).
 
 ## Crew dispatch profiles (config/crew-dispatch.json)

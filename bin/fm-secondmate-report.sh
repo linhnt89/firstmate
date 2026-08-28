@@ -11,11 +11,13 @@
 #   fm-secondmate-report.sh <status-file> <verb> <corr_id> <note...>
 #   fm-secondmate-report.sh --doc <status-file> <verb> <corr_id> <doc-path> <note...>
 #   fm-secondmate-report.sh --direct-doc <status-file> <verb> <alignment-id> <doc-path> <note...>
+#   fm-secondmate-report.sh --alignment-ready <status-file> <alignment-id> <kind> <epoch>
 #
 # Examples:
 #   fm-secondmate-report.sh "$STATUS" done abcdef0123456789 "audit clean"
 #   fm-secondmate-report.sh --doc "$STATUS" done abcdef0123456789 data/x/report.md "see report"
 #   fm-secondmate-report.sh --direct-doc "$STATUS" done design-a1 data/design-a1/report.md "alignment ready"
+#   fm-secondmate-report.sh --alignment-ready "$STATUS" alignment-a1 preflight epoch-1
 #
 # The status file must be the absolute parent route from the secondmate charter
 # (state/<id>.status under the PARENT home), never a path relative to this
@@ -23,7 +25,9 @@
 # evidence by the parent pending-reply guard and does not acknowledge the
 # request. `--direct-doc` is only for a captain-initiated local alignment: it
 # deliberately writes an uncorrelated keyed document pointer and never creates
-# or consumes a pending-reply correlation.
+# or consumes a pending-reply correlation. `--alignment-ready` emits a
+# machine-readable executor event; the parent consumes it and is the only
+# process that folds readiness into its lifecycle record.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,18 +40,67 @@ Usage:
   fm-secondmate-report.sh <status-file> <verb> <corr_id> <note...>
   fm-secondmate-report.sh --doc <status-file> <verb> <corr_id> <doc-path> <note...>
   fm-secondmate-report.sh --direct-doc <status-file> <verb> <alignment-id> <doc-path> <note...>
+  fm-secondmate-report.sh --alignment-ready <status-file> <alignment-id> <kind> <epoch>
 EOF
   exit 2
 }
 
 DOC_MODE=0
 DIRECT_DOC_MODE=0
-if [ "${1:-}" = "--doc" ]; then
+ALIGNMENT_READY_MODE=0
+if [ "${1:-}" = "--alignment-ready" ]; then
+  ALIGNMENT_READY_MODE=1
+  shift
+elif [ "${1:-}" = "--doc" ]; then
   DOC_MODE=1
   shift
 elif [ "${1:-}" = "--direct-doc" ]; then
   DIRECT_DOC_MODE=1
   shift
+fi
+
+if [ "$ALIGNMENT_READY_MODE" = 1 ]; then
+  [ $# -eq 4 ] || usage
+  STATUS_FILE=$1
+  ALIGNMENT_ID=$2
+  READY_KIND=$3
+  READY_EPOCH=$4
+  case "$ALIGNMENT_ID" in
+    ''|.*|*[!A-Za-z0-9._-]*)
+      echo "error: alignment-id must be a path-safe identifier (got '$ALIGNMENT_ID')" >&2
+      exit 1
+      ;;
+  esac
+  [ "${#ALIGNMENT_ID}" -le 64 ] || {
+    echo "error: alignment-id is too long (maximum 64 characters)" >&2
+    exit 1
+  }
+  case "$READY_KIND" in preflight|reconciliation) ;; *)
+    echo "error: readiness kind must be preflight or reconciliation" >&2
+    exit 1
+    ;;
+  esac
+  case "$READY_EPOCH" in
+    ''|*[!A-Za-z0-9._:-]*)
+      echo "error: readiness epoch contains unsupported characters" >&2
+      exit 1
+      ;;
+  esac
+  case "$STATUS_FILE" in
+    /*) ;;
+    *) echo "error: readiness status file must be absolute: $STATUS_FILE" >&2; exit 1 ;;
+  esac
+  [ ! -L "$STATUS_FILE" ] || {
+    echo "error: readiness status file must not be a symlink: $STATUS_FILE" >&2
+    exit 1
+  }
+  [ -d "$(dirname "$STATUS_FILE")" ] || {
+    echo "error: parent status directory is missing: $(dirname "$STATUS_FILE")" >&2
+    exit 1
+  }
+  printf 'alignment-ready [key=alignment-%s]: kind=%s epoch=%s source=executor\n' \
+    "$ALIGNMENT_ID" "$READY_KIND" "$READY_EPOCH" >> "$STATUS_FILE"
+  exit 0
 fi
 
 if [ "$DIRECT_DOC_MODE" = 1 ]; then

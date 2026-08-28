@@ -113,39 +113,35 @@ run_session() {
     PATH="$FAKEBIN:$PATH" "$SESSION" "$@"
 }
 
-ack_preflight() {
-  local home=$1 id=$2 token
-  token=$(grep '^executor_ack_token=' "$PARENT/state/$id.alignment" | cut -d= -f2-)
-  FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$home" \
-    FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state" \
-    FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_FAKE_TREEHOUSE_HOME="$home" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \
-    PATH="$FAKEBIN:$PATH" "$SESSION" acknowledge "$id" --kind preflight \
-      --executor-home "$home" --parent-home "$PARENT" \
-      --parent-data "$PARENT/data" --parent-state "$PARENT/state" \
-      --parent-projects "$PARENT/projects" --parent-config "$PARENT/config" \
-      --token "$token"
+emit_preflight() {
+  local home=$1
+  (
+    cd "$home" || exit
+    FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$home" \
+      FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state" \
+      FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+      FM_FAKE_TREEHOUSE_HOME="$home" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \
+      PATH="$FAKEBIN:$PATH" "$SESSION" emit-ready preflight
+  )
 }
 
-ack_reconciliation() {
-  local home=$1 id=$2 token
-  token=$(grep '^executor_ack_token=' "$PARENT/state/$id.alignment" | cut -d= -f2-)
-  FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$home" \
-    FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state" \
-    FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_FAKE_TREEHOUSE_HOME="$home" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \
-    PATH="$FAKEBIN:$PATH" "$SESSION" acknowledge "$id" --kind reconciliation \
-      --executor-home "$home" --parent-home "$PARENT" \
-      --parent-data "$PARENT/data" --parent-state "$PARENT/state" \
-      --parent-projects "$PARENT/projects" --parent-config "$PARENT/config" \
-      --token "$token"
+emit_reconciliation() {
+  local home=$1
+  (
+    cd "$home" || exit
+    FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$home" \
+      FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state" FM_PROJECTS_OVERRIDE="$home/projects" \
+      FM_CONFIG_OVERRIDE="$home/config" FM_FAKE_TREEHOUSE_HOME="$home" \
+      FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" PATH="$FAKEBIN:$PATH" \
+      "$SESSION" emit-ready reconciliation
+  )
 }
 
 write_report() {
   local home=$1 id=$2 topic=$3 candidate=${4:-None identified.} project_path=${5:-$PROJECT} acknowledge=${6:-1}
   if [ "$acknowledge" -eq 1 ] \
     && [ "$(grep -c '^preflight_ack=acknowledged$' "$PARENT/state/$id.alignment" 2>/dev/null || true)" = 0 ]; then
-    ack_preflight "$home" "$id" >/dev/null
+    emit_preflight "$home" >/dev/null
   fi
   cat > "$home/data/$id/report.md" <<EOF
 # Pre-implementation alignment
@@ -213,7 +209,7 @@ assert_session_identity() {
 }
 
 test_fresh_isolated_sessions_and_parent_archive() {
-  local h1 h2 out token
+  local h1 h2 out
   printf '# Oversized unrelated owner\n\n' > "$PROJECT/docs/oversized.md"
   awk 'BEGIN { for (i = 0; i < 10000; i++) print "unrelated owner payload" }' >> "$PROJECT/docs/oversized.md"
   git -C "$PROJECT" add docs/oversized.md
@@ -236,19 +232,16 @@ test_fresh_isolated_sessions_and_parent_archive() {
   assert_not_contains "$(cat "$PARENT/state/one.alignment")" 'preflight_ack=acknowledged' \
     "fresh launch claimed semantic readiness before executor preflight"
   write_report "$h1" one 'first topic' 'None identified.' "$PROJECT" 0
-  token=$(grep '^executor_ack_token=' "$PARENT/state/one.alignment" | cut -d= -f2-)
-  if out=$(run_session "$h1" acknowledge one --kind preflight --executor-home "$h1" \
-    --parent-home "$PARENT" --parent-data "$PARENT/data" --parent-state "$PARENT/state" \
-    --parent-projects "$PARENT/projects" --parent-config "$PARENT/config" --token "$token" 2>&1); then
-    fail "semantic readiness accepted acknowledgement from an unbound executor home"
+  if out=$(run_session "$h1" emit-ready preflight 2>&1); then
+    fail "parent-side invocation emitted a readiness event"
   fi
-  assert_contains "$out" 'bound executor-owned route' \
-    "semantic readiness did not authenticate the executor-owned route"
+  assert_contains "$out" 'ephemeral alignment home' \
+    "parent-side readiness invocation did not require the executor route"
   if out=$(run_session "$h1" retain one 2>&1); then
     fail "retention accepted a report before executor semantic readiness acknowledgement"
   fi
-  assert_contains "$out" 'executor-authenticated semantic readiness acknowledgement' \
-    "retention did not enforce executor semantic readiness acknowledgement"
+  assert_contains "$out" 'matching executor readiness event' \
+    "retention did not enforce executor semantic readiness event"
   h2=$(make_ephemeral_home session-two)
   out=$(run_session "$h2" start two "$PROJECT" 'second topic' --harness claude)
   assert_contains "$out" 'started alignment session two project=project topic=second topic' \
@@ -259,6 +252,127 @@ test_fresh_isolated_sessions_and_parent_archive() {
   assert_grep 'Session: one' "$h1/data/charter.md" "first charter lost its session identity"
   assert_grep 'Session: two' "$h2/data/charter.md" "second charter lost its session identity"
   pass "alignment sessions are fresh, project-scoped, captain-facing, and coexist without persistent registration"
+}
+
+test_readiness_events_use_parent_fold_and_epochs() {
+  local home out status first_epoch second_epoch
+  home=$(make_ephemeral_home readiness-events)
+  run_session "$home" start readiness-events "$PROJECT" 'readiness topic' --harness claude >/dev/null
+  write_report "$home" readiness-events 'readiness topic' 'None identified.' "$PROJECT" 0
+  first_epoch=$(grep '^readiness_epoch=' "$PARENT/state/readiness-events.alignment" | cut -d= -f2-)
+  printf 'alignment-ready [key=alignment-wrong-session]: kind=preflight epoch=%s source=executor\n' \
+    "$first_epoch" >> "$PARENT/state/readiness-events.status"
+  printf 'alignment-ready [key=alignment-readiness-events]: kind=preflight epoch=wrong-epoch source=executor\n' \
+    >> "$PARENT/state/readiness-events.status"
+  out=$(cd "$PARENT" && FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$home" \
+    FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state" \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+    FM_FAKE_TREEHOUSE_HOME="$home" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \
+    PATH="$FAKEBIN:$PATH" "$SESSION" emit-ready preflight 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "parent working directory impersonated the executor readiness route"
+  assert_contains "$out" 'executor working directory' \
+    "parent-side readiness invocation did not require the executor route"
+  out=$(run_session "$home" retain readiness-events 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "wrong-session or wrong-epoch event authorized retention"
+  assert_contains "$out" 'matching executor readiness event' \
+    "wrong readiness events did not remain unaccepted"
+  emit_preflight "$home" >/dev/null
+  assert_not_contains "$(cat "$PARENT/state/readiness-events.alignment")" \
+    'preflight_ack=acknowledged' \
+    "executor event directly mutated the parent lifecycle record"
+  printf 'readiness epoch delta\n' > "$PROJECT/readiness-epoch-delta.txt"
+  run_session "$home" reconcile readiness-events >/dev/null
+  second_epoch=$(grep '^readiness_epoch=' "$PARENT/state/readiness-events.alignment" | cut -d= -f2-)
+  [ "$second_epoch" != "$first_epoch" ] || fail "reconciliation did not advance its readiness epoch"
+  out=$(run_session "$home" retain readiness-events 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a replayed preflight event satisfied a newer reconciliation epoch"
+  assert_contains "$out" 'matching executor readiness event' \
+    "stale readiness event was not rejected for the newer epoch"
+  emit_reconciliation "$home" >/dev/null
+  assert_not_contains "$(cat "$PARENT/state/readiness-events.alignment")" \
+    'reconciliation_ack=acknowledged' \
+    "reconciliation event directly mutated the parent lifecycle record"
+  run_session "$home" retain readiness-events >/dev/null
+  assert_grep 'reconciliation_ack=acknowledged' "$PARENT/state/readiness-events.alignment" \
+    "parent did not fold the matching reconciliation event"
+  rm -f "$PROJECT/readiness-epoch-delta.txt"
+  run_session "$home" close readiness-events >/dev/null
+  pass "readiness events use the existing parent status channel and epoch-correlated parent fold"
+}
+
+test_completed_archive_recovery_precedes_freshness() {
+  local home archive report_backup out status
+  home=$(make_ephemeral_home completion-recovery)
+  run_session "$home" start completion-recovery "$PROJECT" 'recovery topic' --harness claude >/dev/null
+  write_report "$home" completion-recovery 'recovery topic'
+  run_session "$home" retain completion-recovery --outcome implementation >/dev/null
+  archive="$PARENT/data/alignments/project/completion-recovery"
+  report_backup="$TMP_ROOT/completion-recovery-report.md"
+  cp "$archive/report.md" "$report_backup"
+  sed -i -E '/^(status|archive|outcome|completion_project_head|completion_project_status_digest|completion_archive_inventory_digest|readiness|accepted_readiness_epoch|preflight_|hydration_)/d' \
+    "$PARENT/state/completion-recovery.alignment"
+  run_session "$home" retain completion-recovery >/dev/null
+  run_session "$home" promote completion-recovery --mode local-only --yolo off \
+    --purpose implementation --task-id completion-recovery-before-delta >/dev/null
+  sed -i -E '/^(status|archive|outcome|completion_project_head|completion_project_status_digest|completion_archive_inventory_digest|readiness|accepted_readiness_epoch|preflight_|hydration_)/d' \
+    "$PARENT/state/completion-recovery.alignment"
+  printf 'canonical knowledge changed after publication\n' > "$PROJECT/completion-recovery-delta.txt"
+  run_session "$home" retain completion-recovery >/dev/null
+  assert_grep 'status=completed' "$PARENT/state/completion-recovery.alignment" \
+    "published completion was not recovered after a later canonical change"
+  out=$(run_session "$home" promote completion-recovery --mode local-only --yolo off \
+    --purpose implementation 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "stale recovered completion was promoted"
+  assert_contains "$out" 'project changed since alignment completion' \
+    "stale recovered completion did not fail at promotion"
+  rm -f "$PROJECT/completion-recovery-delta.txt"
+
+  printf 'corrupted final archive\n' > "$archive/report.md"
+  sed -i -E '/^(status|archive|outcome|completion_project_head|completion_project_status_digest|completion_archive_inventory_digest|readiness|accepted_readiness_epoch|preflight_|hydration_)/d' \
+    "$PARENT/state/completion-recovery.alignment"
+  out=$(run_session "$home" retain completion-recovery 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "corrupted final archive was recovered"
+  assert_contains "$out" 'invalid or mismatched completed archive' \
+    "corrupted final archive did not fail closed"
+  mv "$report_backup" "$archive/report.md"
+
+  sed -i 's#^project_path=.*#project_path=/foreign/project#' "$archive/metadata"
+  out=$(run_session "$home" retain completion-recovery 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "foreign final archive identity was recovered"
+  assert_contains "$out" 'invalid or mismatched completed archive' \
+    "foreign final archive identity did not fail closed"
+  sed -i "s#^project_path=.*#project_path=$PROJECT#" "$archive/metadata"
+
+  run_session "$home" retain completion-recovery >/dev/null
+  run_session "$home" retain completion-recovery >/dev/null
+  assert_grep 'status=completed' "$PARENT/state/completion-recovery.alignment" \
+    "repeated completion recovery was not idempotent"
+  run_session "$home" close completion-recovery >/dev/null
+  pass "final archive publication is the completion commit point and recovery precedes freshness checks"
+}
+
+test_independent_archive_after_completion_does_not_stale() {
+  local first second
+  first=$(make_ephemeral_home independent-after)
+  run_session "$first" start independent-after-a "$PROJECT" 'independent A' --harness claude >/dev/null
+  write_report "$first" independent-after-a 'independent A'
+  run_session "$first" retain independent-after-a --outcome implementation >/dev/null
+  sed -i -E '/^(status|archive|outcome|completion_project_head|completion_project_status_digest|completion_archive_inventory_digest|readiness|accepted_readiness_epoch|preflight_|hydration_)/d' \
+    "$PARENT/state/independent-after-a.alignment"
+  second=$(make_ephemeral_home independent-after-b)
+  run_session "$second" start independent-after-b "$PROJECT" 'independent B' --harness claude >/dev/null
+  write_report "$second" independent-after-b 'independent B'
+  run_session "$second" retain independent-after-b --outcome implementation >/dev/null
+  run_session "$first" retain independent-after-a >/dev/null
+  run_session "$first" promote independent-after-a --mode local-only --yolo off \
+    --purpose implementation --task-id independent-after-a-followup >/dev/null
+  pass "independent later alignment history does not stale a completed outcome"
 }
 
 test_project_key_reservation_isolates_same_basename_projects() {
@@ -612,7 +726,7 @@ test_promotion_detects_content_changes_to_preexisting_dirty_knowledge() {
   printf '\npreexisting local knowledge change\n' >> "$PROJECT/README.md"
   home=$(make_ephemeral_home dirty-knowledge)
   run_session "$home" start dirty-knowledge "$PROJECT" 'dirty knowledge topic' --harness claude >/dev/null
-  ack_preflight "$home" dirty-knowledge >/dev/null
+  emit_preflight "$home" >/dev/null
   printf '\npost-hydration edit to the same dirty owner\n' >> "$PROJECT/README.md"
   write_report "$home" dirty-knowledge 'dirty knowledge topic'
   out=$(run_session "$home" retain dirty-knowledge 2>&1)
@@ -624,24 +738,32 @@ test_promotion_detects_content_changes_to_preexisting_dirty_knowledge() {
   out=$(run_session "$home" retain dirty-knowledge 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "retention accepted a refreshed snapshot without executor acknowledgement"
-  assert_contains "$out" 'executor-authenticated semantic readiness acknowledgement' \
+  assert_contains "$out" 'matching executor readiness event' \
     "retention did not require executor acknowledgement after reconciliation"
-  ack_reconciliation "$home" dirty-knowledge >/dev/null
+  emit_reconciliation "$home" >/dev/null
+  assert_grep 'alignment-ready [key=alignment-dirty-knowledge]: kind=reconciliation' "$PARENT/state/dirty-knowledge.status" \
+    "executor reconciliation event was not emitted on the parent status channel"
+  assert_not_contains "$(cat "$PARENT/state/dirty-knowledge.alignment")" 'reconciliation_ack=acknowledged' \
+    "executor event directly mutated parent lifecycle state"
+  run_session "$home" retain dirty-knowledge --outcome implementation >/dev/null
   assert_grep 'reconciliation_ack=acknowledged' "$PARENT/state/dirty-knowledge.alignment" \
-    "executor reconciliation acknowledgement was not durably recorded"
+    "parent did not fold the executor reconciliation event"
   assert_not_contains "$(cat "$PARENT/state/dirty-knowledge.alignment")" 'reconciliation_pending=1' \
-    "executor reconciliation acknowledgement left the pending marker active"
-  run_session "$home" retain dirty-knowledge >/dev/null
+    "parent reconciliation fold left the pending marker active"
   run_session "$home" promote dirty-knowledge --mode local-only --yolo off --purpose implementation >/dev/null
   cp "$original" "$PROJECT/README.md"
   pass "retention requires reconciliation for changed canonical knowledge"
 }
 
 test_archive_staging_recovers_atomically() {
-  local home="$TMP_ROOT/session-staging"
+  local home="$TMP_ROOT/session-staging" hydration_head hydration_status hydration_archive readiness_epoch out status
   home=$(make_ephemeral_home session-staging)
   run_session "$home" start staged "$PROJECT" 'staged topic' --harness claude >/dev/null
   write_report "$home" staged 'staged topic'
+  hydration_head=$(grep '^hydration_project_head=' "$PARENT/state/staged.alignment" | cut -d= -f2-)
+  hydration_status=$(grep '^hydration_project_status_digest=' "$PARENT/state/staged.alignment" | cut -d= -f2-)
+  hydration_archive=$(grep '^hydration_archive_inventory_digest=' "$PARENT/state/staged.alignment" | cut -d= -f2-)
+  readiness_epoch=$(grep '^readiness_epoch=' "$PARENT/state/staged.alignment" | cut -d= -f2-)
   mkdir -p "$PARENT/data/alignments/project/.staged.tmp"
   cp "$home/data/staged/report.md" "$PARENT/data/alignments/project/.staged.tmp/report.md"
   cat > "$PARENT/data/alignments/project/.staged.tmp/metadata" <<EOF
@@ -657,12 +779,29 @@ report=report.md
 supersedes=
 outcome=both
 report_digest=$(sha256sum "$PARENT/data/alignments/project/.staged.tmp/report.md" | awk '{print $1}')
+completion_project_head=$hydration_head
+completion_project_status_digest=$hydration_status
+completion_archive_inventory_digest=$hydration_archive
+readiness_epoch=$readiness_epoch
 retained=2024-01-01T00:00:00Z
 EOF
   out=$(run_session "$home" inventory "$PROJECT")
   assert_not_contains "$out" $'session=staged\t' \
     "inventory exposed an unpublished retention staging archive"
-  run_session "$home" retain staged >/dev/null
+  printf 'staging must wait for current project knowledge\n' > "$PROJECT/staged-delta.txt"
+  out=$(run_session "$home" retain staged 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "retention published staging after project knowledge changed"
+  assert_contains "$out" 'changed since reconciliation' \
+    "staging retention did not enforce mutable freshness"
+  run_session "$home" reconcile staged >/dev/null
+  assert_grep 'reconciliation_pending=1' "$PARENT/state/staged.alignment" \
+    "staging freshness refusal did not leave reconciliation available"
+  rm -f "$PROJECT/staged-delta.txt"
+  run_session "$home" reconcile staged >/dev/null
+  rm -rf "$PARENT/data/alignments/project/.staged.tmp"
+  emit_reconciliation "$home" >/dev/null
+  run_session "$home" retain staged --outcome both >/dev/null
   assert_present "$PARENT/data/alignments/project/staged/report.md" \
     "retention did not publish a recovered staged archive"
   assert_absent "$PARENT/data/alignments/project/.staged.tmp" \
@@ -920,8 +1059,11 @@ test_failed_start_removes_owned_project_reservation
 test_hashed_project_key_survives_failed_basename_start
 test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
+test_readiness_events_use_parent_fold_and_epochs
 test_promotion_detects_content_changes_to_preexisting_dirty_knowledge
 test_archive_staging_recovers_atomically
+test_completed_archive_recovery_precedes_freshness
+test_independent_archive_after_completion_does_not_stale
 test_archive_symlink_ancestors_are_rejected
 test_teardown_rejects_symlinked_data_root
 test_spawn_requires_parent_alignment_record
