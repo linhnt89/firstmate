@@ -116,13 +116,29 @@ run_session() {
 ack_preflight() {
   local home=$1 id=$2 token
   token=$(grep '^executor_ack_token=' "$PARENT/state/$id.alignment" | cut -d= -f2-)
-  run_session "$home" acknowledge "$id" --kind preflight --executor-home "$home" --token "$token"
+  FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$home" \
+    FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state" \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+    FM_FAKE_TREEHOUSE_HOME="$home" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \
+    PATH="$FAKEBIN:$PATH" "$SESSION" acknowledge "$id" --kind preflight \
+      --executor-home "$home" --parent-home "$PARENT" \
+      --parent-data "$PARENT/data" --parent-state "$PARENT/state" \
+      --parent-projects "$PARENT/projects" --parent-config "$PARENT/config" \
+      --token "$token"
 }
 
 ack_reconciliation() {
   local home=$1 id=$2 token
   token=$(grep '^executor_ack_token=' "$PARENT/state/$id.alignment" | cut -d= -f2-)
-  run_session "$home" acknowledge "$id" --kind reconciliation --executor-home "$home" --token "$token"
+  FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$home" \
+    FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state" \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+    FM_FAKE_TREEHOUSE_HOME="$home" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \
+    PATH="$FAKEBIN:$PATH" "$SESSION" acknowledge "$id" --kind reconciliation \
+      --executor-home "$home" --parent-home "$PARENT" \
+      --parent-data "$PARENT/data" --parent-state "$PARENT/state" \
+      --parent-projects "$PARENT/projects" --parent-config "$PARENT/config" \
+      --token "$token"
 }
 
 write_report() {
@@ -131,7 +147,6 @@ write_report() {
     && [ "$(grep -c '^preflight_ack=acknowledged$' "$PARENT/state/$id.alignment" 2>/dev/null || true)" = 0 ]; then
     ack_preflight "$home" "$id" >/dev/null
   fi
-  local home=$1 id=$2 topic=$3 candidate=${4:-None identified.} project_path=${5:-$PROJECT}
   cat > "$home/data/$id/report.md" <<EOF
 # Pre-implementation alignment
 
@@ -222,11 +237,13 @@ test_fresh_isolated_sessions_and_parent_archive() {
     "fresh launch claimed semantic readiness before executor preflight"
   write_report "$h1" one 'first topic' 'None identified.' "$PROJECT" 0
   token=$(grep '^executor_ack_token=' "$PARENT/state/one.alignment" | cut -d= -f2-)
-  if out=$(run_session "$h1" acknowledge one --kind preflight --executor-home "$PARENT" --token "$token" 2>&1); then
+  if out=$(run_session "$h1" acknowledge one --kind preflight --executor-home "$h1" \
+    --parent-home "$PARENT" --parent-data "$PARENT/data" --parent-state "$PARENT/state" \
+    --parent-projects "$PARENT/projects" --parent-config "$PARENT/config" --token "$token" 2>&1); then
     fail "semantic readiness accepted acknowledgement from an unbound executor home"
   fi
-  assert_contains "$out" 'not from its bound executor home' \
-    "semantic readiness did not authenticate the executor home"
+  assert_contains "$out" 'bound executor-owned route' \
+    "semantic readiness did not authenticate the executor-owned route"
   if out=$(run_session "$h1" retain one 2>&1); then
     fail "retention accepted a report before executor semantic readiness acknowledgement"
   fi
@@ -378,7 +395,13 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   h1="$TMP_ROOT/session-one"
   h2="$TMP_ROOT/session-two"
   write_report "$h1" one 'first topic' 'Domain term candidate.'
-  run_session "$h1" retain one >/dev/null
+  run_session "$h1" retain one --outcome implementation >/dev/null
+  h2=$(make_ephemeral_home session-two-independent)
+  run_session "$h2" start independent "$PROJECT" 'independent topic' --harness claude >/dev/null
+  write_report "$h2" independent 'independent topic'
+  run_session "$h2" retain independent --outcome implementation >/dev/null
+  run_session "$h1" promote one --mode local-only --yolo off --purpose implementation \
+    --task-id one-before-independent-promotion >/dev/null
   printf 'changed after completed alignment\n' > "$PROJECT/completed-delta.txt"
   if out=$(run_session "$h1" reconcile one 2>&1); then
     fail "parent-only reconciliation refreshed a completed immutable alignment"
@@ -497,6 +520,12 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   run_session "$h2" start two-promotion "$PROJECT" 'second topic' --harness claude >/dev/null
   write_report "$h2" two-promotion 'second topic' 'Superseding domain decision.'
   run_session "$h2" retain two-promotion --supersedes one --outcome both >/dev/null
+  if out=$(run_session "$h1" promote one --mode local-only --yolo off \
+    --purpose implementation --task-id one-after-supersession 2>&1); then
+    fail "promotion accepted an explicitly superseded alignment"
+  fi
+  assert_contains "$out" 'was explicitly superseded' \
+    "explicit supersession did not invalidate the earlier promotion"
   # Simulate a crash after archive publication but before the parent record update.
   sed -i '/^outcome=/d; s/^status=.*/status=running/' "$PARENT/state/two-promotion.alignment"
   if out=$(run_session "$h2" reconcile two-promotion 2>&1); then

@@ -21,9 +21,10 @@ The executor may use `bin/fm-alignment-session.sh retrieve <project> <session-id
 When the parent uses a configured alternate data root, the command also passes `--archive-data <parent-data-root>`.
 The generic retrieval shape is `bin/fm-alignment-session.sh retrieve <project> <historical-session-id> --archive-home <parent-home> --archive-data <parent-data-root>` after inventory identifies a relevant prior session.
 A fresh launch records an observable launch acknowledgement after the worker endpoint and instructions delivery have been confirmed, but semantic readiness remains pending.
-After inspecting relevant current owners, the executor authenticates a preflight acknowledgement before it can report substantive readiness or complete the outcome.
-If project knowledge or the historical inventory changes while the outcome is still mutable, run `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context, then require the executor's authenticated reconciliation acknowledgement before retention.
-A completed immutable outcome cannot be refreshed in place after a later delta; start a revised session and explicitly supersede the earlier report.
+After inspecting relevant current owners, the executor authenticates a preflight acknowledgement from its bound executor-owned route before it can report substantive readiness or complete the outcome.
+If project knowledge or the historical inventory changes while the outcome is still mutable, run `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context, then require the executor's authenticated reconciliation acknowledgement from that route before retention.
+A completed immutable outcome freezes its historical-inventory baseline so independent later archives do not make it unpromotable, but canonical project changes or explicit supersession still invalidate promotion.
+A completed immutable outcome cannot be refreshed in place after a later canonical delta; start a revised session and explicitly supersede the earlier report.
 
 The executor writes a validated report rather than a transcript.
 The report identifies the project, session, topic, source, and the existing alignment sections, followed by a separate durable-knowledge-candidates section.

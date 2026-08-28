@@ -67,8 +67,9 @@ The executor then uses the existing uncorrelated `complete-direct` pointer for a
 The parent runs `bin/fm-alignment-session.sh retain <session-id>` and must durably copy the validated report into its project archive before cleanup.
 Launch acknowledgement proves endpoint and instructions delivery only, while executor-authenticated preflight acknowledgement separately establishes semantic readiness.
 Retention requires that readiness acknowledgement and the project and archive inventory to match its accepted snapshot.
-For a mutable session, the parent uses `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context, then the bound executor acknowledges that snapshot before retention.
-A completed immutable outcome cannot be refreshed in place after a later delta; start a revised session and explicitly supersede the earlier report.
+For a mutable session, the parent uses `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context, then the bound executor-owned route acknowledges that snapshot before retention; a parent caller cannot synthesize that acknowledgement by copying session identity fields.
+A completed outcome freezes its historical-inventory baseline so an independent later archive does not make it unpromotable, while a canonical project change or explicit supersession invalidates promotion.
+A completed immutable outcome cannot be refreshed in place after a later canonical delta; start a revised session and explicitly supersede the earlier report.
 A non-empty incomplete abandonment is retained as explicitly abandoned historical evidence and cannot authorize implementation, while an empty scratch session may be closed without an archive.
 `inventory` reads archive metadata only, while `retrieve` is the explicit body-read operation.
 A successful fresh launch records an observable launch acknowledgement after endpoint and instructions delivery confirmation, but leaves semantic readiness pending until the executor completes and authenticates its current-owner preflight.
