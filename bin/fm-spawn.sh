@@ -437,6 +437,12 @@ spawn_remote_secondmate() {
     fm_lock_release "$SPAWN_TASK_LOCK" || true
     return 3
   fi
+  if [ "$ALIGNMENT_SESSION" -eq 1 ]; then
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: --alignment-session is only available for local parent-owned alignment sessions" >&2
+    return 1
+  fi
   host=$(secondmate_registry_field "$DATA/secondmates.md" "$id" host)
   root=$(secondmate_registry_field "$DATA/secondmates.md" "$id" root)
   home=$(secondmate_registry_field "$DATA/secondmates.md" "$id" home)
@@ -1573,6 +1579,58 @@ validate_firstmate_home_for_spawn() {
   printf '%s\n' "$abs_home"
 }
 
+validate_alignment_session_binding() {
+  local id=$1 home=$2 record parent_marker session_meta abs_home abs_parent record_home
+  record="$STATE/$id.alignment"
+  parent_marker="$home/.fm-secondmate-parent"
+  session_meta="$home/data/$id/session.meta"
+  [ -f "$record" ] && [ ! -L "$record" ] || {
+    echo "error: --alignment-session requires a parent-owned alignment session record for $id" >&2
+    return 1
+  }
+  [ "$(fm_meta_get "$record" schema)" = fm-alignment-session.v1 ] \
+    && [ "$(fm_meta_get "$record" session_id)" = "$id" ] \
+    && [ "$(fm_meta_get "$record" source)" = local ] \
+    && case "$(fm_meta_get "$record" status)" in starting|running) true ;; *) false ;; esac \
+    || {
+      echo "error: parent alignment session record for $id is malformed or not launchable" >&2
+      return 1
+    }
+  abs_home=$(resolved_existing_dir "$home") || return 1
+  record_home=$(fm_meta_get "$record" home)
+  [ -n "$record_home" ] && [ "$(resolved_existing_dir "$record_home")" = "$abs_home" ] || {
+    echo "error: alignment session $id is not bound to this secondmate home" >&2
+    return 1
+  }
+  [ -n "$(fm_meta_get "$record" project_name)" ] \
+    && [ -n "$(fm_meta_get "$record" project_path)" ] \
+    && [ -n "$(fm_meta_get "$record" project_key)" ] \
+    && [ -n "$(fm_meta_get "$record" topic)" ] || {
+      echo "error: parent alignment session record for $id lacks project or topic identity" >&2
+      return 1
+    }
+  [ -f "$parent_marker" ] && [ ! -L "$parent_marker" ] \
+    && [ "$(fm_meta_get "$parent_marker" schema)" = fm-secondmate-parent.v1 ] \
+    && [ "$(fm_meta_get "$parent_marker" route)" = local ] \
+    || {
+      echo "error: alignment session $id is missing its parent ownership marker" >&2
+      return 1
+    }
+  abs_parent=$(resolved_existing_dir "$(fm_meta_get "$parent_marker" parent_home)") || return 1
+  [ "$abs_parent" = "$(resolved_existing_dir "$FM_HOME")" ] || {
+    echo "error: alignment session $id has a foreign parent ownership marker" >&2
+    return 1
+  }
+  [ -f "$session_meta" ] && [ ! -L "$session_meta" ] \
+    && [ "$(fm_meta_get "$session_meta" schema)" = fm-alignment-session.v1 ] \
+    && [ "$(fm_meta_get "$session_meta" session_id)" = "$id" ] \
+    && [ "$(fm_meta_get "$session_meta" project_path)" = "$(fm_meta_get "$record" project_path)" ] \
+    && [ "$(fm_meta_get "$session_meta" topic)" = "$(fm_meta_get "$record" topic)" ] || {
+      echo "error: alignment session $id has incomplete session identity metadata" >&2
+      return 1
+    }
+}
+
 validate_firstmate_operational_dirs() {
   local abs_home=$1 abs_active_home=$2 abs_root=$3 name dir abs_dir
   for name in data state config projects; do
@@ -1616,6 +1674,9 @@ fi
 if [ "$KIND" = secondmate ]; then
   [ -n "$FIRSTMATE_HOME" ] || { echo "error: no firstmate home supplied or registered for $ID" >&2; exit 1; }
   PROJ_ABS=$(validate_firstmate_home_for_spawn "$ID" "$FIRSTMATE_HOME")
+  if [ "$ALIGNMENT_SESSION" -eq 1 ]; then
+    validate_alignment_session_binding "$ID" "$FIRSTMATE_HOME" || exit 1
+  fi
   if [ "$ALIGNMENT_SESSION" -eq 0 ] \
     && { [ -e "$DATA/secondmates.md" ] || [ -L "$DATA/secondmates.md" ]; }; then
     if ! secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$ID" "$FIRSTMATE_HOME"; then

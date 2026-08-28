@@ -209,6 +209,50 @@ test_fresh_isolated_sessions_and_parent_archive() {
   pass "alignment sessions are fresh, project-scoped, captain-facing, and coexist without persistent registration"
 }
 
+test_alignment_spawn_requires_parent_owned_record() {
+  local home out status
+  home=$(make_ephemeral_home unregistered-alignment)
+  printf '%s\n' unregistered-alignment > "$home/.fm-secondmate-home"
+  cat > "$home/.fm-secondmate-parent" <<EOF
+schema=fm-secondmate-parent.v1
+route=local
+parent_home=$PARENT
+EOF
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
+    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" unregistered-alignment "$home" \
+    --secondmate --alignment-session --harness claude 2>&1); then
+    fail "unregistered alignment spawn was accepted"
+  else
+    status=$?
+  fi
+  [ "$status" -ne 0 ] || fail "unregistered alignment spawn returned success"
+  assert_contains "$out" 'requires a parent-owned alignment session record' \
+    "missing parent alignment record was not refused"
+
+  cat > "$PARENT/state/malformed-alignment.alignment" <<EOF
+schema=fm-alignment-session.v1
+session_id=malformed-alignment
+EOF
+  printf '%s\n' malformed-alignment > "$home/.fm-secondmate-home"
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
+    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" malformed-alignment "$home" \
+    --secondmate --alignment-session --harness claude 2>&1); then
+    fail "malformed alignment spawn was accepted"
+  else
+    status=$?
+  fi
+  [ "$status" -ne 0 ] || fail "malformed alignment spawn returned success"
+  assert_contains "$out" 'is malformed or not launchable' \
+    "malformed parent alignment record was not refused"
+  pass "alignment spawns require valid parent-owned session records"
+}
+
 test_project_key_reservation_isolates_same_basename_projects() {
   local home key_one key_two
   make_same_basename_project
@@ -813,6 +857,7 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
 }
 
 make_parent_and_project
+test_alignment_spawn_requires_parent_owned_record
 test_fresh_isolated_sessions_and_parent_archive
 test_project_key_reservation_isolates_same_basename_projects
 test_failed_start_removes_owned_project_reservation
