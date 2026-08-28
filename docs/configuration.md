@@ -305,13 +305,22 @@ The Kimi installer requires an existing regular non-symlink `~/.kimi-code/config
 Its `remove` action excises only the marker-delimited Firstmate region and removes Firstmate's hook files.
 For Pi and pi-signed secondmate launches, `fm-spawn.sh` starts the selected executable with `-e` pointed at the secondmate home's own tracked `.pi/extensions/fm-primary-pi-watch.ts` and `.pi/extensions/fm-primary-turnend-guard.ts`, both already present from the secondmate home's git worktree.
 
+## Local alignment executor (config/alignment-harness)
+
+`config/alignment-harness` is an optional local, gitignored file for the fresh project-scoped alignment path.
+Its first non-empty, non-comment line is `<harness> [<model>] [<effort>]`, and the values are passed only to that ephemeral captain-facing session.
+A missing file uses the current Firstmate harness without consulting the persistent Secondmate setting, while a configured model or effort remains local configuration and is never copied into tracked policy.
+The selected harness must be one of the verified alignment-capable adapters accepted by `fm-spawn.sh`.
+Use `bin/fm-alignment-session.sh start` to resolve one project and one topic, and use its `emit-ready`, `reconcile`, `retain`, `inventory`, `retrieve`, `promote`, and `close` commands for the rest of the lifecycle.
+The session archive and knowledge-layer distinction are documented in [`alignment-sessions.md`](alignment-sessions.md).
+
 ## Crew dispatch profiles (config/crew-dispatch.json)
 
 `config/crew-dispatch.json` is an optional local, gitignored file containing natural-language rules that firstmate reads before dispatching a crewmate or scout.
 The shell scripts do not match those rules; firstmate chooses the best matching rule with judgment, resolves its profile object or array under the operating contract in `AGENTS.md` section 4 and `quota-array-dispatch`, and passes only concrete `--harness`, `--model`, and `--effort` flags to `fm-spawn.sh`.
 When the file exists, `fm-spawn.sh` enforces that contract by refusing crewmate and scout spawns that lack an explicit harness (`--harness`, a positional adapter, or a raw launch command).
 Batch spawns satisfy the same requirement with a shared `--harness`.
-Secondmate spawns are exempt and still resolve through `config/secondmate-harness` and its optional model and effort tokens.
+Secondmate spawns are exempt and still resolve through `config/secondmate-harness` and its optional model and effort tokens; fresh alignment sessions resolve through `config/alignment-harness` instead.
 This section is the single owner of the canonical schema and its per-field semantics.
 `AGENTS.md` section 4 owns the always-loaded dispatch intake boundary, and `quota-array-dispatch` owns the completion-aware profile-array selection procedure.
 

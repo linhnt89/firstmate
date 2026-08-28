@@ -33,7 +33,7 @@ Hard rules, in priority order:
    A scout worktree is declared scratch and may be discarded only after its report exists and the shared unresolved-decision completion gate passes.
 4. **Ordinary crewmates never address the captain.**
    Ordinary crewmate communication flows through firstmate, and direct captain intervention in an ordinary crewmate window is reconciled at the next supervision review.
-   A persistent Secondmate is the narrow exception: only when the captain explicitly initiates its session may it converse directly for pre-implementation alignment within its registered scope, without creating ordinary implementation work or relaying the detailed conversation through firstmate.
+   A persistent Secondmate is the narrow exception for explicitly requested direct alignment and is a non-default compatibility path; new local alignment uses a fresh task-scoped session, and only when the captain explicitly requests one resolved project and one coherent topic may its executor converse directly, without creating ordinary implementation work or relaying the detailed conversation through firstmate.
 5. **Report outcomes faithfully.**
    If work failed, say so plainly with the evidence.
 
@@ -67,6 +67,7 @@ bin/                 helper scripts, committed; read each script's header before
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate. Inherited as the literal file: a concrete primary adapter value also controls a secondmate home's own crewmates (section 4)
 config/crew-dispatch.json  optional crewmate dispatch profiles; LOCAL, gitignored; firstmate-maintained but human-editable natural-language rules that choose a per-task harness/model/effort profile (section 4). Inherited by secondmate homes
 config/secondmate-harness  harness the PRIMARY uses to launch SECONDMATE agents, optionally followed by a model and effort token on the same line ("<harness> [<model>] [<effort>]"; section 4); LOCAL, gitignored; absent or "default" harness falls back to config/crew-harness then firstmate's own. The primary's own setting; NOT inherited into secondmate homes (secondmates do not spawn secondmates)
+config/alignment-harness  optional local harness/model/effort pin for fresh project-scoped captain-facing alignment sessions; not shared policy or inherited material; see docs/configuration.md
 config/backlog-backend  backlog backend override; LOCAL, gitignored; absent or "tasks-axi" = default tasks-axi backend, "manual" = force routine backlog updates to hand-editing; inherited by secondmate homes (section 10)
 config/backend  runtime session-provider backend override for new tasks; LOCAL, gitignored; absent = falls through to runtime auto-detection (the runtime firstmate itself is executing inside), then tmux; tmux is the verified reference backend (docs/tmux-backend.md), while herdr, zellij, orca, and cmux are experimental spawn backends (docs/herdr-backend.md, docs/zellij-backend.md, docs/orca-backend.md, docs/cmux-backend.md) - herdr and cmux can also be selected by runtime auto-detection, zellij and orca never are (always explicit), and codex-app is not accepted; see docs/codex-app-backend.md; inherited by secondmate homes under the primary-authoritative contract in secondmate-provisioning
 config/calm     Pi Calm presentation preference; LOCAL, gitignored, and not inherited; see docs/configuration.md "Pi Calm preference"
@@ -89,6 +90,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
   secondmates.md      local and remote secondmate routing table; firstmate-private, maintained by the secondmate seed helpers (section 6)
   <id>/brief.md      per-task crewmate brief, or per-secondmate charter brief when kind=secondmate
   <id>/report.md     scout task deliverable, written by the crewmate; survives teardown
+  alignments/<project-key>/<session-id>/  parent-owned historical local alignment reports and metadata; gitignored
 projects/            cloned repos; gitignored; read-only except under hard rule 1's concrete captain-approved project operation exception
 state/               runtime records and signals; gitignored
   <id>.status        appended by crewmates: "<state>: <note>" wake-event lines, not current-state truth
@@ -246,8 +248,9 @@ Its scope field drives routing and its project list is non-exclusive provisionin
 Keep `local-only` work in the main home.
 
 A secondmate is idle by default and ordinarily acts only on work routed by the main firstmate.
-The narrow exception is a captain-explicitly-initiated pre-implementation alignment conversation within the secondmate's registered scope; it may create only that alignment work and never a survey, audit, ordinary implementation task, or self-directed improvement sweep.
-It reconciles its own work under way after restart, then waits silently; an empty queue never authorizes any work.
+Fresh local alignment is requested through the `alignment` skill and `bin/fm-alignment-session.sh`, scoped to one resolved project and one coherent topic, rather than by provisioning a persistent Secondmate.
+It may create only that alignment work and never a survey, audit, ordinary implementation task, or self-directed improvement sweep.
+Persistent Secondmates remain idle and retain the non-default direct-alignment compatibility path for explicitly requested work.
 Ordinary implementation remains routed through firstmate, and firstmate does not relay the detailed direct alignment conversation.
 Do not reconstruct or supervise a secondmate's child tree from the main home.
 
@@ -278,7 +281,7 @@ Proceed on one confident match while naming the project in plain language; ask o
 Route by the nature of the work against each registered secondmate scope, not by a non-exclusive clone list.
 Keep `local-only` work in the main home.
 Send in-scope work to the fitting secondmate unless it is blocked or the captain explicitly redirects it; do not read the secondmate's chat because marked routed replies return through its status or referenced document.
-If no secondmate scope fits, use the main home or discuss creating an appropriate persistent secondmate.
+If no secondmate scope fits, use the main home for ordinary work or start a fresh project-scoped alignment session for material alignment; discuss creating a persistent secondmate only for a durable larger-fleet routing need.
 For one-off or infrequent operational work, start with the simplest direct end-to-end path.
 Do not build wrappers, control planes, policy layers, custom verifiers, or automation unless the direct path exposes a concrete blocker or repeated need that justifies the added machinery.
 
@@ -295,7 +298,8 @@ Load `diagnostic-reasoning` before scoping a reported bug and before acting on a
 
 Before implementation intake, classify whether material product, behavioral, contract, data-semantic, or architectural decisions remain unresolved.
 Load `alignment` for that conditional reasoning path; new ship and scout briefs start `Alignment contract: unclassified`, and clear mechanical requests explicitly become `bypassed` without a design interview.
-A material request becomes `Alignment contract: required` and must not spawn or promote implementation until a completed local Secondmate report or external handoff has been consumed into a complete implementation brief.
+The skill and `bin/fm-alignment-session.sh` own fresh project-scoped local sessions; persistent Secondmates are not the default local alignment executor.
+A material request becomes `Alignment contract: required` and must not spawn or promote implementation until a completed local alignment report or external handoff has been consumed into a complete implementation brief.
 The alignment skill owns the local direct-conversation and external-specialist procedures, while `bin/fm-spawn.sh` and scout promotion enforce the brief barrier; scouts may investigate while unclassified, but promotion requires an explicit classification.
 
 Resolve every ship task's concrete delivery mode and `yolo` merge posture at intake.

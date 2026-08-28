@@ -225,6 +225,10 @@
       "audience": "maintainer-architecture"
     },
     {
+      "path": "docs/alignment-sessions.md",
+      "audience": "operator-current"
+    },
+    {
       "path": "docs/architecture.md",
       "audience": "maintainer-architecture"
     },

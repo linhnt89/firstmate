@@ -5,7 +5,7 @@
 #
 # Usage:
 #   fm-alignment.sh check <brief> [--investigation|--promotion]
-#   fm-alignment.sh validate-report <report> [--complete]
+#   fm-alignment.sh validate-report <report> [--complete] [--session <id>] [--project <name>]
 #   fm-alignment.sh start [<alignment-id>]
 #   fm-alignment.sh complete-direct <alignment-id> [<note...>]
 #
@@ -22,11 +22,19 @@
 # decisions. `--complete` additionally requires the exact normalized sentinel
 # `None - no material open decisions remain.` in the last section.
 #
-# `start` creates a Secondmate-local data/<alignment-id>/report.md scaffold.
-# `complete-direct` validates that report, resolves the locally seeded parent
+# `start` and `complete-direct` remain compatible with reports in already-seeded
+# persistent Secondmate homes. New local sessions are managed by
+# fm-alignment-session.sh, which adds project/session identity and a separate
+# durable-knowledge-candidates section before the parent archives the report.
+# `complete-direct` validates that report, requires an emitted current-epoch
+# readiness event for an on-demand session, resolves the locally seeded parent
 # from .fm-secondmate-parent and .fm-secondmate-home, and appends a keyed,
-# uncorrelated document pointer to the parent's status stream. Parent-routed
-# marked requests continue to use fm-secondmate-report.sh with corr=<id>.
+# uncorrelated document pointer to the parent's status stream. The parent later
+# consumes the readiness event and folds lifecycle state during retention.
+# This remains the non-default compatibility path for already-provisioned
+# persistent Secondmates; new local alignment uses fm-alignment-session.sh.
+# Parent-routed marked requests continue to use fm-secondmate-report.sh with
+# corr=<id>.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -118,6 +126,26 @@ remaining_is_clear() {
   [ "$count" = 1 ] || return 1
   normalized=$(printf '%s\n' "$first" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   [ "$normalized" = 'None - no material open decisions remain.' ]
+}
+
+validate_session_report() {
+  local file=$1 session_id=$2 project_name=$3 project_path=${4:-} content heading body
+  content=$(validate_sections "$file")
+  for heading in 'Project identity' 'Alignment identity' 'Durable-knowledge candidates'; do
+    if [ "$(printf '%s\n' "$content" | grep -c -E "^## ${heading}[[:space:]]*$" || true)" != 1 ]; then
+      fail "$file must contain exactly one '## $heading' section for an on-demand session"
+    fi
+    body=$(section_body "$content" "$heading")
+    [ -n "$body" ] || fail "$file has an empty '## $heading' section"
+  done
+  grep -Fqx "Name: $project_name" "$file" \
+    || fail "$file does not identify project $project_name"
+  [ -z "$project_path" ] || grep -Fqx "Path: $project_path" "$file" \
+    || fail "$file does not identify project path $project_path"
+  grep -Fqx "Session: $session_id" "$file" \
+    || fail "$file does not identify session $session_id"
+  remaining_is_clear "$content" \
+    || fail "$file still has material open decisions in '## Remaining open decisions'"
 }
 
 check_brief() {
@@ -230,7 +258,7 @@ EOF
 }
 
 complete_direct_alignment() {
-  local id=${1:-} report content mate_id parent_home parent_status note
+  local id=${1:-} report content mate_id parent_home parent_status note session_project session_project_path session_record epoch
   [ "$#" -ge 1 ] || usage
   alignment_home
   alignment_id_valid "$id" || fail "invalid alignment id: $id"
@@ -238,8 +266,16 @@ complete_direct_alignment() {
   [ -f "$report" ] && [ ! -L "$report" ] \
     || fail "alignment report is missing or unsafe: $report"
   content=$(validate_sections "$report")
-  remaining_is_clear "$content" \
-    || fail "$report still has material open decisions in '## Remaining open decisions'"
+  if [ -f "$FM_HOME/data/$id/session.meta" ] && [ ! -L "$FM_HOME/data/$id/session.meta" ]; then
+    session_project=$(sed -n 's/^project_name=//p' "$FM_HOME/data/$id/session.meta" | tail -1)
+    session_project_path=$(sed -n 's/^project_path=//p' "$FM_HOME/data/$id/session.meta" | tail -1)
+    [ -n "$session_project" ] || fail "alignment session metadata has no project name"
+    [ -n "$session_project_path" ] || fail "alignment session metadata has no project path"
+    validate_session_report "$report" "$id" "$session_project" "$session_project_path"
+  else
+    remaining_is_clear "$content" \
+      || fail "$report still has material open decisions in '## Remaining open decisions'"
+  fi
 
   # A direct captain conversation is a local Secondmate-only route. The seeded
   # identity and parent binding are the durable proof of which parent receives
@@ -259,6 +295,20 @@ complete_direct_alignment() {
   [ -d "$parent_home" ] && [ ! -L "$parent_home" ] \
     || fail "Secondmate parent home is missing or unsafe: $parent_home"
   parent_status="$parent_home/state/$mate_id.status"
+  if [ -f "$FM_HOME/data/$id/session.meta" ] && [ ! -L "$FM_HOME/data/$id/session.meta" ]; then
+    session_record="$parent_home/state/$id.alignment"
+    [ -f "$session_record" ] && [ ! -L "$session_record" ] \
+      || fail "on-demand alignment requires a parent session record before completion"
+    epoch=$(sed -n 's/^readiness_epoch=//p' "$FM_HOME/data/$id/session.meta" | tail -1)
+    if [ -n "$epoch" ] && [ -f "$parent_status" ] && [ ! -L "$parent_status" ]; then
+      if ! grep -Fqx "alignment-ready [key=alignment-$id]: kind=preflight epoch=$epoch source=executor" "$parent_status" \
+        && ! grep -Fqx "alignment-ready [key=alignment-$id]: kind=reconciliation epoch=$epoch source=executor" "$parent_status"; then
+        fail "on-demand alignment requires an emitted executor readiness event before completion"
+      fi
+    else
+      fail "on-demand alignment requires an emitted executor readiness event before completion"
+    fi
+  fi
   [ ! -L "$parent_status" ] || fail "parent status path must not be a symlink: $parent_status"
   note=${*:2}
   [ -n "$note" ] || note="alignment $id is implementation-ready"
@@ -281,14 +331,26 @@ case "$COMMAND" in
     ;;
   validate-report)
     complete=0
-    if [ "$#" -gt 0 ]; then
-      [ "$#" = 1 ] && [ "$1" = --complete ] || usage
-      complete=1
-    fi
-    content=$(validate_sections "$FILE")
-    if [ "$complete" -eq 1 ]; then
-      remaining_is_clear "$content" \
-        || fail "$FILE still has material open decisions in '## Remaining open decisions'"
+    session_id=
+    project_name=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --complete) complete=1; shift ;;
+        --session) [ "$#" -ge 2 ] || usage; session_id=$2; shift 2 ;;
+        --project) [ "$#" -ge 2 ] || usage; project_name=$2; shift 2 ;;
+        *) usage ;;
+      esac
+    done
+    if [ -n "$session_id" ] || [ -n "$project_name" ]; then
+      [ -n "$session_id" ] && [ -n "$project_name" ] || usage
+      alignment_id_valid "$session_id" || fail "invalid alignment session id: $session_id"
+      validate_session_report "$FILE" "$session_id" "$project_name"
+    else
+      content=$(validate_sections "$FILE")
+      if [ "$complete" -eq 1 ]; then
+        remaining_is_clear "$content" \
+          || fail "$FILE still has material open decisions in '## Remaining open decisions'"
+      fi
     fi
     printf 'valid\n'
     ;;

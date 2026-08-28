@@ -658,7 +658,7 @@ secondmate_liveness_sweep() {
   # primary-only no-op there. Mid-session liveness remains explicitly out of
   # scope and requires a separate periodic signal.
   [ -d "$STATE" ] || return 0
-  local meta id remote_host label __fm_timing_stamp parallel=0
+  local meta id remote_host label alignment_session __fm_timing_stamp parallel=0
   SECONDMATE_RESPAWNED_IDS=""
   if bootstrap_parallel_begin; then
     parallel=1
@@ -670,22 +670,23 @@ secondmate_liveness_sweep() {
     # body below keeps its single-exit-per-outcome shape.
     id=$(basename "$meta" .meta)
     remote_host=$(fm_meta_get "$meta" remote_host)
+    alignment_session=$(fm_meta_get "$meta" alignment_session)
     label=$id
     [ -z "$remote_host" ] || label="$id@$remote_host"
     if [ "$parallel" -eq 1 ]; then
-      bootstrap_parallel_spawn secondmate_liveness_one_timed "$meta" "$id" "$label"
+      bootstrap_parallel_spawn secondmate_liveness_one_timed "$meta" "$id" "$label" "$alignment_session"
     else
-      secondmate_liveness_one_timed "$meta" "$id" "$label"
+      secondmate_liveness_one_timed "$meta" "$id" "$label" "$alignment_session"
     fi
   done
   [ "$parallel" -eq 0 ] || bootstrap_parallel_finish
   return 0
 }
 
-secondmate_liveness_one_timed() {  # <meta> <id> <label>
-  local meta=$1 id=$2 label=$3 __fm_timing_stamp
+secondmate_liveness_one_timed() {  # <meta> <id> <label> [alignment_session]
+  local meta=$1 id=$2 label=$3 alignment_session=${4:-0} __fm_timing_stamp
   __fm_timing_stamp=$(fm_timing_now_ms)
-  secondmate_liveness_one "$meta" "$id"
+  secondmate_liveness_one "$meta" "$id" "$alignment_session"
   fm_timing_record secondmate liveness "$__fm_timing_stamp" "$label"
 }
 
@@ -693,9 +694,14 @@ secondmate_liveness_one_timed() {  # <meta> <id> <label>
 # timed; every `return` here was a `continue` in the loop and means exactly the
 # same thing - move on to the next secondmate. Respawned ids are recorded through
 # secondmate_note_respawned so a concurrent sweep can collect them after wait.
-secondmate_liveness_one() {  # <meta> <id>
-  local meta=$1 id=$2
+secondmate_liveness_one() {  # <meta> <id> [alignment_session]
+  local meta=$1 id=$2 alignment_session=${3:-0}
   local window harness backend target agent_state out cause remote_host remote_rc readiness_reason route_out remote_backend
+  local -a respawn_args
+  respawn_args=("$id" --secondmate)
+  if [ "$alignment_session" = 1 ]; then
+    respawn_args+=(--alignment-session)
+  fi
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] || return 0
   harness=$(fm_meta_get "$meta" harness)
@@ -753,7 +759,7 @@ secondmate_liveness_one() {  # <meta> <id>
         ;;
       dead|missing)
         cause="remote endpoint $agent_state on its configured host"
-        if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
+        if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${respawn_args[@]}" 2>&1); then
           secondmate_note_respawned "$id"
           report_relaunch "$id" "$cause" "host=$remote_host"
         else
@@ -790,7 +796,7 @@ secondmate_liveness_one() {  # <meta> <id>
       else
         cause="recorded endpoint confidently missing"
       fi
-      if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
+      if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${respawn_args[@]}" 2>&1); then
         secondmate_note_respawned "$id"
         report_relaunch "$id" "$cause" "backend=$backend"
       else

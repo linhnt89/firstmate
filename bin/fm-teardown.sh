@@ -47,9 +47,11 @@
 # Projected closes share the presentation-order lock, refuse to close the
 # captain's active tab, and restore the exact response-derived pre-close tab
 # if Herdr's last-pane cleanup focuses an unrelated neighboring workspace.
-# Secondmates (kind=secondmate in meta) are retired explicitly. Normal
-# teardown refuses while their home has in-flight crewmate meta files; --force
-# is the approved discard path that prevalidates child removal targets, locks each
+# Secondmates (kind=secondmate in meta) are retired explicitly. An ephemeral
+# alignment session is the parent-owned, unregistered kind=secondmate variant;
+# fm-alignment-session.sh proves its archive before calling this normal cleanup
+# path. Normal teardown refuses while their home has in-flight crewmate meta
+# files; --force is the approved discard path that prevalidates child removal targets, locks each
 # descendant home's task set before enumeration, and holds those locks through
 # child cleanup. Contention refuses the complete forced teardown before child
 # mutation. Local and remote retirement serialize their destructive phase with
@@ -696,8 +698,187 @@ ORCA_PATH_MATCH_VERIFIED=0
 
 KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
 [ -n "$KIND" ] || KIND=ship
+ALIGNMENT_SESSION=$(grep '^alignment_session=' "$META" | tail -1 | cut -d= -f2- || true)
 MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
+alignment_project_key_for_path() {
+  local path=$1 name root meta existing_path collision=0
+  name=$(basename "$path" | sed 's/[^A-Za-z0-9._-]/-/g')
+  [ -n "$name" ] || name=project
+  root="$DATA/alignments/$name"
+  if [ -d "$root" ] && [ ! -L "$root" ]; then
+    if [ -f "$root/.project-path" ] && [ ! -L "$root/.project-path" ]; then
+      reserved_path=$(cat "$root/.project-path")
+      if [ "$reserved_path" = "$path" ]; then
+        printf '%s\n' "$name"
+        return
+      fi
+      [ -z "$reserved_path" ] || collision=1
+    fi
+    for meta in "$root"/*/metadata; do
+      [ -f "$meta" ] && [ ! -L "$meta" ] || continue
+      existing_path=$(grep '^project_path=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+      if [ "$existing_path" = "$path" ]; then
+        printf '%s\n' "$name"
+        return
+      fi
+      [ -z "$existing_path" ] || collision=1
+    done
+  fi
+  if [ "$collision" -eq 1 ]; then
+    if command -v sha256sum >/dev/null 2>&1; then
+      printf '%s' "$path" | sha256sum | cut -c1-12 | sed "s#^#$name-#"
+    else
+      printf '%s' "$path" | shasum -a 256 | cut -c1-12 | sed "s#^#$name-#"
+    fi
+  else
+    printf '%s\n' "$name"
+  fi
+}
+alignment_project_key_valid() {
+  case "${1-}" in
+    ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+}
+alignment_file_digest() {
+  local file=$1
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$file" | awk '{print $1}'
+  else
+    shasum -a 256 -- "$file" | awk '{print $1}'
+  fi
+}
+if [ "$ALIGNMENT_SESSION" = 1 ]; then
+  ALIGNMENT_RECORD="$STATE/$ID.alignment"
+  if [ ! -f "$ALIGNMENT_RECORD" ] || [ -L "$ALIGNMENT_RECORD" ]; then
+    echo "REFUSED: ephemeral alignment $ID has no valid parent session record" >&2
+    exit 1
+  fi
+  ALIGNMENT_STATUS=$(grep '^status=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_ARCHIVE=$(grep '^archive=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_PROJECT_NAME=$(grep '^project_name=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_PROJECT_PATH=$(grep '^project_path=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_PROJECT_KEY=$(grep '^project_key=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_TOPIC=$(grep '^topic=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_RUNTIME_PROJECT_NAME=$(grep '^alignment_project_name=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_RUNTIME_PROJECT_PATH=$(grep '^alignment_project_path=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_RUNTIME_PROJECT_KEY=$(grep '^alignment_project_key=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_RUNTIME_TOPIC=$(grep '^alignment_topic=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  [ ! -L "$DATA" ] && [ ! -L "$DATA/alignments" ] || {
+    echo "REFUSED: ephemeral alignment $ID has an unsafe parent alignment data root; no valid parent-owned archive can be confirmed" >&2
+    exit 1
+  }
+  alignment_project_key_valid "$ALIGNMENT_PROJECT_KEY" || {
+    echo "REFUSED: ephemeral alignment $ID has an unsafe project archive key" >&2
+    exit 1
+  }
+  ALIGNMENT_PROJECT_CANONICAL=$(CDPATH='' cd -- "$ALIGNMENT_PROJECT_PATH" 2>/dev/null && pwd -P || true)
+  if [ -z "$ALIGNMENT_PROJECT_PATH" ] \
+    || [ "$ALIGNMENT_PROJECT_CANONICAL" != "$ALIGNMENT_PROJECT_PATH" ] \
+    || ! git -C "$ALIGNMENT_PROJECT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "REFUSED: ephemeral alignment $ID has an invalid project path binding" >&2
+    exit 1
+  fi
+  ALIGNMENT_DERIVED_PROJECT_NAME=$(basename "$ALIGNMENT_PROJECT_PATH" | sed 's/[^A-Za-z0-9._-]/-/g')
+  [ -n "$ALIGNMENT_DERIVED_PROJECT_NAME" ] || ALIGNMENT_DERIVED_PROJECT_NAME=project
+  [ "$ALIGNMENT_PROJECT_NAME" = "$ALIGNMENT_DERIVED_PROJECT_NAME" ] || {
+    echo "REFUSED: ephemeral alignment $ID has an invalid project name binding" >&2
+    exit 1
+  }
+  ALIGNMENT_DERIVED_PROJECT_KEY=$(alignment_project_key_for_path "$ALIGNMENT_PROJECT_PATH")
+  ALIGNMENT_EXPECTED_ARCHIVE="$DATA/alignments/$ALIGNMENT_PROJECT_KEY/$ID/report.md"
+  ALIGNMENT_METADATA="${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}/metadata"
+  ALIGNMENT_METADATA_SESSION=$(grep '^session_id=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_PROJECT_NAME=$(grep '^project_name=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_PROJECT_PATH=$(grep '^project_path=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_PROJECT_KEY=$(grep '^project_key=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_TOPIC=$(grep '^topic=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_STATUS=$(grep '^status=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_REPORT=$(grep '^report=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_DIGEST=$(grep '^report_digest=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  if [ "$ALIGNMENT_STATUS" = completed ]; then
+    if ! {
+      [ -f "$ALIGNMENT_RECORD" ] && [ ! -L "$ALIGNMENT_RECORD" ] \
+        && [ "$(grep '^session_id=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" = "$ID" ] \
+        && [ -n "$ALIGNMENT_PROJECT_NAME" ] \
+        && [ -n "$ALIGNMENT_PROJECT_PATH" ] \
+        && [ -n "$ALIGNMENT_PROJECT_KEY" ] \
+        && [ -n "$ALIGNMENT_TOPIC" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_PATH" = "$ALIGNMENT_PROJECT_PATH" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_KEY" = "$ALIGNMENT_PROJECT_KEY" ] \
+        && [ "$ALIGNMENT_RUNTIME_TOPIC" = "$ALIGNMENT_TOPIC" ] \
+        && [ -n "$HOME_PATH" ] \
+        && [ "$(grep '^home=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" = "$HOME_PATH" ] \
+        && [ "$ALIGNMENT_PROJECT_KEY" = "$ALIGNMENT_DERIVED_PROJECT_KEY" ] \
+        && [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] \
+        && [ ! -L "$DATA" ] \
+        && [ ! -L "$DATA/alignments" ] \
+        && [ ! -L "$DATA/alignments/$ALIGNMENT_PROJECT_KEY" ] \
+        && [ ! -L "${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}" ] \
+        && [ -f "$ALIGNMENT_ARCHIVE" ] && [ ! -L "$ALIGNMENT_ARCHIVE" ] \
+        && [ -f "$ALIGNMENT_METADATA" ] && [ ! -L "$ALIGNMENT_METADATA" ] \
+        && [ "$ALIGNMENT_METADATA_SESSION" = "$ID" ] \
+        && [ "$ALIGNMENT_METADATA_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME" ] \
+        && [ "$ALIGNMENT_METADATA_PROJECT_PATH" = "$ALIGNMENT_PROJECT_PATH" ] \
+        && [ "$ALIGNMENT_METADATA_PROJECT_KEY" = "$ALIGNMENT_PROJECT_KEY" ] \
+        && [ "$ALIGNMENT_METADATA_TOPIC" = "$ALIGNMENT_TOPIC" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_PATH" = "$ALIGNMENT_PROJECT_PATH" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_KEY" = "$ALIGNMENT_PROJECT_KEY" ] \
+        && [ "$ALIGNMENT_RUNTIME_TOPIC" = "$ALIGNMENT_TOPIC" ] \
+        && [ "$ALIGNMENT_METADATA_STATUS" = completed ] \
+        && [ "$ALIGNMENT_METADATA_REPORT" = report.md ] \
+        && [ -n "$ALIGNMENT_METADATA_DIGEST" ] \
+        && [ "$ALIGNMENT_METADATA_DIGEST" = "$(alignment_file_digest "$ALIGNMENT_ARCHIVE")" ] \
+        && grep -Fqx "Path: $ALIGNMENT_PROJECT_PATH" "$ALIGNMENT_ARCHIVE" \
+        && grep -Fqx "Topic: $ALIGNMENT_TOPIC" "$ALIGNMENT_ARCHIVE";
+    }; then
+      echo "REFUSED: ephemeral alignment $ID has no valid parent-owned archive; retain the report before cleanup" >&2
+      exit 1
+    fi
+  elif [ "$(grep '^alignment_abandon=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != 1 ]; then
+    echo "REFUSED: ephemeral alignment $ID has no retained report; close it through fm-alignment-session.sh --abandon or retain it first" >&2
+    exit 1
+  elif ! [ -f "$ALIGNMENT_RECORD" ] || [ -L "$ALIGNMENT_RECORD" ] \
+    || [ "$(grep '^session_id=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != "$ID" ] \
+    || [ -z "$ALIGNMENT_PROJECT_NAME" ] || [ -z "$ALIGNMENT_PROJECT_PATH" ] \
+    || [ -z "$ALIGNMENT_PROJECT_KEY" ] || [ -z "$ALIGNMENT_TOPIC" ] || [ -z "$HOME_PATH" ] \
+    || [ "$ALIGNMENT_RUNTIME_PROJECT_NAME" != "$ALIGNMENT_PROJECT_NAME" ] \
+    || [ "$ALIGNMENT_RUNTIME_PROJECT_PATH" != "$ALIGNMENT_PROJECT_PATH" ] \
+    || [ "$ALIGNMENT_RUNTIME_PROJECT_KEY" != "$ALIGNMENT_PROJECT_KEY" ] \
+    || [ "$ALIGNMENT_RUNTIME_TOPIC" != "$ALIGNMENT_TOPIC" ] \
+    || [ "$ALIGNMENT_PROJECT_KEY" != "$ALIGNMENT_DERIVED_PROJECT_KEY" ] \
+    || [ "$(grep '^home=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != "$HOME_PATH" ] \
+    || { [ "$ALIGNMENT_STATUS" != starting ] && [ "$ALIGNMENT_STATUS" != running ]; }; then
+    echo "REFUSED: ephemeral alignment $ID has no valid parent session record for abandonment" >&2
+    exit 1
+  elif [ -L "$HOME_PATH/data/$ID/report.md" ] || \
+    { [ -f "$HOME_PATH/data/$ID/report.md" ] && [ -s "$HOME_PATH/data/$ID/report.md" ]; }; then
+    if ! {
+      [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] \
+        && [ -f "$ALIGNMENT_ARCHIVE" ] && [ ! -L "$ALIGNMENT_ARCHIVE" ] \
+        && [ -f "$ALIGNMENT_METADATA" ] && [ ! -L "$ALIGNMENT_METADATA" ] \
+        && [ "$ALIGNMENT_METADATA_SESSION" = "$ID" ] \
+        && [ "$ALIGNMENT_METADATA_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME" ] \
+        && [ "$ALIGNMENT_METADATA_PROJECT_PATH" = "$ALIGNMENT_PROJECT_PATH" ] \
+        && [ "$ALIGNMENT_METADATA_PROJECT_KEY" = "$ALIGNMENT_PROJECT_KEY" ] \
+        && [ "$ALIGNMENT_METADATA_TOPIC" = "$ALIGNMENT_TOPIC" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_PATH" = "$ALIGNMENT_PROJECT_PATH" ] \
+        && [ "$ALIGNMENT_RUNTIME_PROJECT_KEY" = "$ALIGNMENT_PROJECT_KEY" ] \
+        && [ "$ALIGNMENT_RUNTIME_TOPIC" = "$ALIGNMENT_TOPIC" ] \
+        && [ "$ALIGNMENT_METADATA_STATUS" = abandoned ] \
+        && [ "$ALIGNMENT_METADATA_REPORT" = report.md ] \
+        && [ -n "$ALIGNMENT_METADATA_DIGEST" ] \
+        && [ "$ALIGNMENT_METADATA_DIGEST" = "$(alignment_file_digest "$ALIGNMENT_ARCHIVE")" ] \
+        && cmp -s "$HOME_PATH/data/$ID/report.md" "$ALIGNMENT_ARCHIVE";
+    }; then
+      echo "REFUSED: ephemeral alignment $ID has material evidence without a valid retained abandoned archive" >&2
+      exit 1
+    fi
+  fi
+fi
 PUBLIC_FOLLOWUP_HOME=$FM_HOME
 PUBLIC_FOLLOWUP_STATE=$STATE
 PUBLIC_FOLLOWUP_WORK_HOME=main
@@ -725,7 +906,16 @@ public_followup_resolve_primary_home() {
   secondmate_registry_validate_bindings "$registry" secondmate_registry_path_key "$id" "$child" || return 1
   printf '%s\n' "$parent"
 }
-if [ -f "$FM_HOME/$SUB_HOME_MARKER" ]; then
+if [ "$ALIGNMENT_SESSION" = 1 ]; then
+  # An ephemeral alignment is intentionally not in data/secondmates.md and has
+  # no Relay promise of its own. Its parent archive is checked by
+  # fm-alignment-session.sh before this normal cleanup path is called.
+  PUBLIC_FOLLOWUP_HOME=
+  PUBLIC_FOLLOWUP_STATE=
+  PUBLIC_FOLLOWUP_PARENT_UNRESOLVED=0
+  PUBLIC_FOLLOWUP_PARENT_RELAY_ACTIVE=0
+  PUBLIC_FOLLOWUP_RELAY_ACTIVE=0
+elif [ -f "$FM_HOME/$SUB_HOME_MARKER" ]; then
   SECOND_MATE_ID=$(sed -n '1p' "$FM_HOME/$SUB_HOME_MARKER")
   # The durable parent record (written once at seeding, next to the identity
   # marker) names this home's route to its parent: "local" when they share a
@@ -1985,7 +2175,8 @@ validate_firstmate_home_for_removal() {
       echo "REFUSED: unsafe $label removal target $home is marked for secondmate ${marker_id:-unknown}, expected $expected_id" >&2
       return 1
     fi
-    if [ -e "$SECONDMATE_REG" ] || [ -L "$SECONDMATE_REG" ]; then
+    if [ "${ALIGNMENT_SESSION:-0}" != 1 ] \
+      && { [ -e "$SECONDMATE_REG" ] || [ -L "$SECONDMATE_REG" ]; }; then
       if ! secondmate_registry_validate_bindings "$SECONDMATE_REG" secondmate_registry_path_key "$expected_id" "$abs_home_path"; then
         case "$SECONDMATE_REGISTRY_ERROR" in
           overlapping\ secondmate\ home\ assignment:*)
@@ -2857,7 +3048,9 @@ if [ "$KIND" = secondmate ]; then
   fi
   handoff_wake_retire_stage_commit \
     || { echo "error: receiver wake cleanup failed; preserving the secondmate route for retry" >&2; exit 1; }
-  remove_secondmate_registry_entry "$ID"
+  if [ "$ALIGNMENT_SESSION" != 1 ]; then
+    remove_secondmate_registry_entry "$ID"
+  fi
 fi
 remove_grok_turnend_auth "$STATE" "$ID" || exit 1
 remove_kimi_turnend_auth "$STATE" "$ID" || exit 1

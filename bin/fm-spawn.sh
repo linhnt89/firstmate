@@ -3,7 +3,7 @@
 # secondmate in its isolated firstmate home.
 # Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>]
 #        fm-spawn.sh <task-id> <project-dir> --scout [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>]
-#        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
+#        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate [--alignment-session]
 #   --mode and --yolo are this task's delivery contract, REQUIRED for every ship
 #   spawn and refused on --scout and --secondmate spawns. Firstmate resolves both
 #   per task at intake (AGENTS.md section 7); data/projects.md holds the captain's
@@ -129,7 +129,12 @@
 #   config reread generations because the new agent reads the converged files.
 #   --scout records kind=scout in the task's meta (report deliverable, scratch worktree;
 #   see AGENTS.md task lifecycle); --secondmate records kind=secondmate and launches in a
-#   provisioned firstmate home; the default is kind=ship.
+#   provisioned firstmate home; the default is kind=ship. --alignment-session is a
+#   secondmate-only fresh-session marker: it requires a valid parent-created
+#   alignment record, skips the persistent registry binding, and records the
+#   parent-owned ephemeral alignment identity, but it never changes the worker kind
+#   or grants implementation authority. Existing persistent Secondmate launches
+#   without this marker retain their direct-alignment compatibility path.
 #   A fresh or relaunched ship checks its brief's pre-implementation alignment contract
 #   before creating or joining an endpoint. `unclassified` and `required` are refused,
 #   `bypassed` keeps clear mechanical work direct, and `complete` is accepted only with
@@ -275,6 +280,7 @@ fm_refuse_if_gate_agent
 [ -n "${FM_SPAWN_NO_GUARD:-}" ] || "$FM_ROOT/bin/fm-guard.sh" || true
 KIND=ship
 KIND_SET=0
+ALIGNMENT_SESSION=0
 HARNESS_ARG=
 MODEL=
 EFFORT=
@@ -313,6 +319,7 @@ for a in "$@"; do
   case "$a" in
     --scout) KIND=scout; KIND_SET=1 ;;
     --secondmate) KIND=secondmate; KIND_SET=1 ;;
+    --alignment-session) ALIGNMENT_SESSION=1 ;;
     --relaunch) RELAUNCH=1 ;;
     --harness) want_value=harness ;;
     --harness=*) HARNESS_ARG=${a#--harness=}; HARNESS_SET=1 ;;
@@ -339,6 +346,10 @@ done
 [ "$MODE_SET" -eq 0 ] || [ -n "$MODE" ] || { echo "error: --mode requires a non-empty value" >&2; exit 1; }
 [ "$YOLO_SET" -eq 0 ] || [ -n "$YOLO" ] || { echo "error: --yolo requires a non-empty value" >&2; exit 1; }
 [ "$TRACEPARENT_SET" -eq 0 ] || [ -n "$TRACEPARENT_ARG" ] || { echo "error: --traceparent requires a non-empty value" >&2; exit 1; }
+if [ "$ALIGNMENT_SESSION" -eq 1 ] && [ "$KIND" != secondmate ]; then
+  echo "error: --alignment-session applies only to --secondmate spawns" >&2
+  exit 1
+fi
 # A parent-delivered carrier replaces this home's own resolution, so it is
 # refused unless it is a secondmate spawn carrying a strictly valid W3C value.
 # Nothing else may reach the pane's TRACEPARENT export.
@@ -427,6 +438,12 @@ spawn_remote_secondmate() {
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
     return 3
+  fi
+  if [ "$ALIGNMENT_SESSION" -eq 1 ]; then
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: --alignment-session is local-only; a remote persistent Secondmate cannot impersonate a parent-created ephemeral alignment" >&2
+    return 1
   fi
   host=$(secondmate_registry_field "$DATA/secondmates.md" "$id" host)
   root=$(secondmate_registry_field "$DATA/secondmates.md" "$id" root)
@@ -1032,6 +1049,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_PRIOR_HARNESS=$(fm_meta_get "$RELAUNCH_META" harness)
   KIND=$(fm_meta_get "$RELAUNCH_META" kind)
   [ -n "$KIND" ] || KIND=ship
+  ALIGNMENT_SESSION=$(fm_meta_get "$RELAUNCH_META" alignment_session)
+  [ -n "$ALIGNMENT_SESSION" ] || ALIGNMENT_SESSION=0
   MODE=$(fm_meta_get "$RELAUNCH_META" mode)
   YOLO=$(fm_meta_get "$RELAUNCH_META" yolo)
   RELAUNCH_WT=$(fm_meta_get "$RELAUNCH_META" worktree)
@@ -1602,10 +1621,156 @@ if [ "$KIND" = secondmate ]; then
   fi
 fi
 
+alignment_parent_record_field() {
+  local file=$1 key=$2
+  awk -F= -v key="$key" '
+    $1 == key { count++; value=substr($0, index($0, "=") + 1) }
+    END { if (count != 1) exit 1; print value }
+  ' "$file"
+}
+
+alignment_project_key_valid() {
+  case "${1-}" in
+    ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+}
+
+alignment_parent_project_key_for_path() {
+  local path=$1 name root meta existing_path reserved_path collision=0
+  name=$(basename "$path" | sed 's/[^A-Za-z0-9._-]/-/g')
+  [ -n "$name" ] || name=project
+  root="$DATA/alignments/$name"
+  if [ -d "$root" ] && [ ! -L "$root" ]; then
+    if [ -f "$root/.project-path" ] && [ ! -L "$root/.project-path" ]; then
+      reserved_path=$(cat "$root/.project-path")
+      if [ "$reserved_path" = "$path" ]; then
+        printf '%s\n' "$name"
+        return
+      fi
+      [ -z "$reserved_path" ] || collision=1
+    fi
+    for meta in "$root"/*/metadata; do
+      [ -f "$meta" ] && [ ! -L "$meta" ] || continue
+      existing_path=$(grep '^project_path=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+      if [ "$existing_path" = "$path" ]; then
+        printf '%s\n' "$name"
+        return
+      fi
+      [ -z "$existing_path" ] || collision=1
+    done
+  fi
+  if [ "$collision" -eq 1 ]; then
+    if command -v sha256sum >/dev/null 2>&1; then
+      printf '%s' "$path" | sha256sum | cut -c1-12 | sed "s#^#$name-#"
+    else
+      printf '%s' "$path" | shasum -a 256 | cut -c1-12 | sed "s#^#$name-#"
+    fi
+  else
+    printf '%s\n' "$name"
+  fi
+}
+
+validate_alignment_parent_record() {
+  local id=$1 home=$2 record schema session project_path canonical_project project_name project_key topic status source recorded_home derived_key value
+  record="$STATE/$id.alignment"
+  [ -f "$record" ] && [ ! -L "$record" ] || {
+    echo "error: --alignment-session requires a parent-created alignment record for $id" >&2
+    return 1
+  }
+  schema=$(alignment_parent_record_field "$record" schema 2>/dev/null || true)
+  session=$(alignment_parent_record_field "$record" session_id 2>/dev/null || true)
+  project_path=$(alignment_parent_record_field "$record" project_path 2>/dev/null || true)
+  project_name=$(alignment_parent_record_field "$record" project_name 2>/dev/null || true)
+  project_key=$(alignment_parent_record_field "$record" project_key 2>/dev/null || true)
+  topic=$(alignment_parent_record_field "$record" topic 2>/dev/null || true)
+  status=$(alignment_parent_record_field "$record" status 2>/dev/null || true)
+  source=$(alignment_parent_record_field "$record" source 2>/dev/null || true)
+  recorded_home=$(alignment_parent_record_field "$record" home 2>/dev/null || true)
+  for value in "$schema" "$session" "$project_path" "$project_name" "$project_key" "$topic" "$status" "$source" "$recorded_home"; do
+    case "$value" in *$'\n'*|*$'\r'*|*$'\t'*)
+      echo "error: alignment parent record contains an invalid control character" >&2
+      return 1
+      ;;
+    esac
+  done
+  [ "$schema" = fm-alignment-session.v1 ] \
+    && [ "$session" = "$id" ] \
+    && [ "$source" = local ] \
+    && { [ "$status" = starting ] || [ "$status" = running ] || [ "$status" = completed ]; } \
+    && [ -n "$topic" ] \
+    && [ "$recorded_home" = "$home" ] || {
+      echo "error: --alignment-session parent record for $id is malformed or not launchable" >&2
+      return 1
+    }
+  case "$project_path" in /*) ;; *) echo "error: alignment parent record project path is not absolute" >&2; return 1 ;; esac
+  canonical_project=$(CDPATH='' cd -- "$project_path" 2>/dev/null && pwd -P) || {
+    echo "error: alignment parent record project path is missing or unsafe" >&2
+    return 1
+  }
+  [ "$canonical_project" = "$project_path" ] || {
+    echo "error: alignment parent record project path is not canonical" >&2
+    return 1
+  }
+  git -C "$project_path" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    echo "error: alignment parent record project path is not a git repository" >&2
+    return 1
+  }
+  project_name=$(basename "$project_path" | sed 's/[^A-Za-z0-9._-]/-/g')
+  [ -n "$project_name" ] || project_name=project
+  [ "$project_name" = "$(alignment_parent_record_field "$record" project_name 2>/dev/null || true)" ] || {
+    echo "error: alignment parent record project name does not match its project path" >&2
+    return 1
+  }
+  alignment_project_key_valid "$project_key" || {
+    echo "error: alignment parent record project key is malformed or unsafe" >&2
+    return 1
+  }
+  [ ! -L "$DATA" ] && [ ! -L "$DATA/alignments" ] || {
+    echo "error: alignment parent record uses an unsafe archive data root" >&2
+    return 1
+  }
+  derived_key=$(alignment_parent_project_key_for_path "$project_path")
+  [ "$project_key" = "$derived_key" ] || {
+    echo "error: alignment parent record project key does not match its project association" >&2
+    return 1
+  }
+  if [ "$RELAUNCH" -eq 1 ]; then
+    [ -z "$(fm_meta_get "$RELAUNCH_META" alignment_project_name)" ] \
+      || [ "$(fm_meta_get "$RELAUNCH_META" alignment_project_name)" = "$project_name" ] || {
+        echo "error: alignment parent project name changed since the recorded session" >&2
+        return 1
+      }
+    [ -z "$(fm_meta_get "$RELAUNCH_META" alignment_project_path)" ] \
+      || [ "$(fm_meta_get "$RELAUNCH_META" alignment_project_path)" = "$project_path" ] || {
+        echo "error: alignment parent project path changed since the recorded session" >&2
+        return 1
+      }
+    [ -z "$(fm_meta_get "$RELAUNCH_META" alignment_project_key)" ] \
+      || [ "$(fm_meta_get "$RELAUNCH_META" alignment_project_key)" = "$project_key" ] || {
+        echo "error: alignment parent project key changed since the recorded session" >&2
+        return 1
+      }
+    [ -z "$(fm_meta_get "$RELAUNCH_META" alignment_topic)" ] \
+      || [ "$(fm_meta_get "$RELAUNCH_META" alignment_topic)" = "$topic" ] || {
+        echo "error: alignment parent topic changed since the recorded session" >&2
+        return 1
+      }
+  fi
+  SPAWN_ALIGNMENT_PROJECT_NAME=$project_name
+  SPAWN_ALIGNMENT_PROJECT_PATH=$project_path
+  SPAWN_ALIGNMENT_PROJECT_KEY=$project_key
+  SPAWN_ALIGNMENT_TOPIC=$topic
+  [ "$recorded_home" = "$home" ]
+}
+
 if [ "$KIND" = secondmate ]; then
   [ -n "$FIRSTMATE_HOME" ] || { echo "error: no firstmate home supplied or registered for $ID" >&2; exit 1; }
   PROJ_ABS=$(validate_firstmate_home_for_spawn "$ID" "$FIRSTMATE_HOME")
-  if [ -e "$DATA/secondmates.md" ] || [ -L "$DATA/secondmates.md" ]; then
+  if [ "$ALIGNMENT_SESSION" -eq 1 ]; then
+    validate_alignment_parent_record "$ID" "$PROJ_ABS" || exit 1
+  fi
+  if [ "$ALIGNMENT_SESSION" -eq 0 ] \
+    && { [ -e "$DATA/secondmates.md" ] || [ -L "$DATA/secondmates.md" ]; }; then
     if ! secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$ID" "$FIRSTMATE_HOME"; then
       echo "error: $SECONDMATE_REGISTRY_ERROR" >&2
       exit 1
@@ -2691,7 +2856,7 @@ fi
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects alignment_session alignment_project_name alignment_project_path alignment_project_key alignment_topic control_relaunch_tx", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -2738,6 +2903,13 @@ preserve_relaunch_meta() {
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
+    if [ "$ALIGNMENT_SESSION" -eq 1 ]; then
+      echo "alignment_session=1"
+      echo "alignment_project_name=$SPAWN_ALIGNMENT_PROJECT_NAME"
+      echo "alignment_project_path=$SPAWN_ALIGNMENT_PROJECT_PATH"
+      echo "alignment_project_key=$SPAWN_ALIGNMENT_PROJECT_KEY"
+      echo "alignment_topic=$SPAWN_ALIGNMENT_TOPIC"
+    fi
   fi
   if [ "$RELAUNCH" -eq 1 ]; then
     preserve_relaunch_meta
