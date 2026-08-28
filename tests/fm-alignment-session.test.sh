@@ -291,12 +291,13 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   # A substituted archive identity must not authorize direct ephemeral cleanup.
   sed -i "s#^project_path=.*#project_path=$TMP_ROOT/foreign-project#" \
     "$PARENT/data/alignments/project/one/metadata"
-  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
     FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
     FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h1" \
     FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
-    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1)
-  [ "$?" -ne 0 ] || fail "direct cleanup accepted an archive with a foreign project identity"
+    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1); then
+    fail "direct cleanup accepted an archive with a foreign project identity"
+  fi
   assert_contains "$out" 'valid parent-owned archive' \
     "archive identity refusal did not preserve teardown safety"
   sed -i "s#^project_path=.*#project_path=$PROJECT#" \
@@ -305,21 +306,23 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   mkdir -p "$PARENT/data/alignments/substituted"
   mv "$PARENT/data/alignments/project/one" "$PARENT/data/alignments/substituted/one"
   sed -i 's/^project_key=.*/project_key=substituted/' "$PARENT/state/one.alignment" "$PARENT/data/alignments/substituted/one/metadata"
-  sed -i 's#^archive=.*#archive='$PARENT'/data/alignments/substituted/one/report.md#' "$PARENT/state/one.alignment"
-  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+  sed -i "s#^archive=.*#archive=$PARENT/data/alignments/substituted/one/report.md#" "$PARENT/state/one.alignment"
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
     FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
     FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h1" \
     FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
-    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1)
-  [ "$?" -ne 0 ] || fail "direct cleanup accepted an archive under a substituted project key"
+    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1); then
+    fail "direct cleanup accepted an archive under a substituted project key"
+  fi
   assert_contains "$out" 'valid parent-owned archive' \
     "project-key validation did not preserve teardown safety"
   mv "$PARENT/data/alignments/substituted/one" "$PARENT/data/alignments/project/one"
   sed -i 's/^project_key=.*/project_key=project/' "$PARENT/state/one.alignment" "$PARENT/data/alignments/project/one/metadata"
-  sed -i 's#^archive=.*#archive='$PARENT'/data/alignments/project/one/report.md#' "$PARENT/state/one.alignment"
+  sed -i "s#^archive=.*#archive=$PARENT/data/alignments/project/one/report.md#" "$PARENT/state/one.alignment"
   sed -i 's/^project_key=.*/project_key=substituted/' "$PARENT/state/one.alignment"
-  out=$(run_session "$h1" promote one --mode local-only --yolo off --purpose implementation 2>&1)
-  [ "$?" -ne 0 ] || fail "promotion accepted a record with a substituted project key"
+  if out=$(run_session "$h1" promote one --mode local-only --yolo off --purpose implementation 2>&1); then
+    fail "promotion accepted a record with a substituted project key"
+  fi
   assert_contains "$out" 'no valid parent-owned archive' \
     "promotion did not validate the deterministic project archive key"
   sed -i 's/^project_key=.*/project_key=project/' "$PARENT/state/one.alignment"
@@ -352,19 +355,21 @@ test_archive_selective_retrieval_supersession_and_promotion() {
     "bin/fm-alignment-session.sh retrieve $PROJECT one --archive-home $PARENT" \
     "ephemeral charter did not provide the parent archive retrieval boundary"
   sed -i 's/^status=.*/status=running/' "$PARENT/data/alignments/project/one/metadata"
-  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
     FM_DATA_OVERRIDE="$h1/data" FM_STATE_OVERRIDE="$h1/state" \
-    "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT" 2>&1)
-  [ "$?" -ne 0 ] || fail "retrieval accepted an incomplete archive"
+    "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT" 2>&1); then
+    fail "retrieval accepted an incomplete archive"
+  fi
   assert_contains "$out" 'is not completed' \
     "retrieval did not validate archive completion status"
   sed -i 's/^status=.*/status=completed/' "$PARENT/data/alignments/project/one/metadata"
   cp "$PARENT/data/alignments/project/one/report.md" "$TMP_ROOT/one-report.md"
   printf 'not an alignment report\n' > "$PARENT/data/alignments/project/one/report.md"
-  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
     FM_DATA_OVERRIDE="$h1/data" FM_STATE_OVERRIDE="$h1/state" \
-    "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT" 2>&1)
-  [ "$?" -ne 0 ] || fail "retrieval accepted an invalid archive report"
+    "$SESSION" retrieve "$PROJECT" one --archive-home "$PARENT" 2>&1); then
+    fail "retrieval accepted an invalid archive report"
+  fi
   assert_contains "$out" 'has an invalid report' \
     "retrieval did not validate the retained report contract"
   mv "$TMP_ROOT/one-report.md" "$PARENT/data/alignments/project/one/report.md"
@@ -395,13 +400,15 @@ test_archive_selective_retrieval_supersession_and_promotion() {
 
   cp "$PARENT/data/alignments/project/two-promotion/report.md" "$TMP_ROOT/two-promotion-report.md"
   printf 'corrupted retained report\n' > "$PARENT/data/alignments/project/two-promotion/report.md"
-  out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only 2>&1)
-  [ "$?" -ne 0 ] || fail "promotion accepted a corrupted retained report"
+  if out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only 2>&1); then
+    fail "promotion accepted a corrupted retained report"
+  fi
   assert_contains "$out" 'no valid parent-owned archive' \
     "promotion did not validate the retained report contract"
   mv "$TMP_ROOT/two-promotion-report.md" "$PARENT/data/alignments/project/two-promotion/report.md"
-  out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose implementation 2>&1)
-  [ "$?" -ne 0 ] || fail "promotion reinterpreted a knowledge-only alignment as implementation"
+  if out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose implementation 2>&1); then
+    fail "promotion reinterpreted a knowledge-only alignment as implementation"
+  fi
   assert_contains "$out" 'does not authorize implementation promotion' \
     "unauthorized implementation promotion did not explain the retained outcome"
   out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only)
@@ -417,8 +424,9 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   [ -z "$(git -C "$PROJECT" status --porcelain)" ] \
     || fail "alignment promotion wrote project documentation directly"
   printf 'changed after hydration\n' > "$PROJECT/stale-alignment-input.txt"
-  out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only --task-id stale-followup 2>&1)
-  [ "$?" -ne 0 ] || fail "promotion accepted a project changed after hydration"
+  if out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only --task-id stale-followup 2>&1); then
+    fail "promotion accepted a project changed after hydration"
+  fi
   assert_contains "$out" 'changed since alignment hydration' \
     "stale project promotion did not require reconciliation"
   rm -f "$PROJECT/stale-alignment-input.txt"
@@ -436,8 +444,9 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   run_session "$h3" start neither "$PROJECT" 'neither outcome' --harness claude >/dev/null
   write_report "$h3" neither 'neither outcome'
   run_session "$h3" retain neither --outcome neither >/dev/null
-  out=$(run_session "$h3" promote neither --mode local-only --yolo off --purpose implementation 2>&1)
-  [ "$?" -ne 0 ] || fail "promotion created work from a neither alignment"
+  if out=$(run_session "$h3" promote neither --mode local-only --yolo off --purpose implementation 2>&1); then
+    fail "promotion created work from a neither alignment"
+  fi
   assert_contains "$out" 'does not authorize implementation promotion' \
     "neither outcome did not reject explicit promotion"
   pass "archive discovery is metadata-only, retrieval is selective, supersession preserves history, and promotion stays on the normal project path"

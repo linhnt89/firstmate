@@ -503,7 +503,7 @@ write_agents_chain() {
 write_canonical_context() {
   local context=$1 project=$2 file relative owner_lines selected_source selected_file kind source candidate rank candidate_rank
   owner_lines=$(canonical_owner_declaration_candidates "$project" | LC_ALL=C awk -F '\t' '!seen[$1 FS $2 FS $3]++')
-  selected_kind= selected_source= selected_file= rank=99
+  selected_source='' selected_file='' rank=99
   while IFS=$'\t' read -r kind source candidate; do
     [ -n "$candidate" ] || continue
     case "$kind" in
@@ -513,7 +513,6 @@ write_canonical_context() {
       *) continue ;;
     esac
     if [ "$candidate_rank" -lt "$rank" ]; then
-      selected_kind=$kind
       selected_source=$source
       selected_file=$candidate
       rank=$candidate_rank
