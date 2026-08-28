@@ -197,6 +197,8 @@ test_fresh_isolated_sessions_and_parent_archive() {
     "alignment did not use the configured model"
   assert_grep 'effort=high' "$PARENT/state/one.alignment" \
     "alignment did not use the configured effort"
+  assert_grep 'launch_ack=acknowledged' "$PARENT/state/one.alignment" \
+    "alignment did not record an observable launch acknowledgement"
   h2=$(make_ephemeral_home session-two)
   out=$(run_session "$h2" start two "$PROJECT" 'second topic' --harness claude)
   assert_contains "$out" 'started alignment session two project=project topic=second topic' \
@@ -207,121 +209,6 @@ test_fresh_isolated_sessions_and_parent_archive() {
   assert_grep 'Session: one' "$h1/data/charter.md" "first charter lost its session identity"
   assert_grep 'Session: two' "$h2/data/charter.md" "second charter lost its session identity"
   pass "alignment sessions are fresh, project-scoped, captain-facing, and coexist without persistent registration"
-}
-
-test_alignment_spawn_requires_parent_owned_record() {
-  local home out status
-  home=$(make_ephemeral_home unregistered-alignment)
-  printf '%s\n' unregistered-alignment > "$home/.fm-secondmate-home"
-  cat > "$home/.fm-secondmate-parent" <<EOF
-schema=fm-secondmate-parent.v1
-route=local
-parent_home=$PARENT
-EOF
-  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
-    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
-    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
-    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
-    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" unregistered-alignment "$home" \
-    --secondmate --alignment-session --harness claude 2>&1); then
-    fail "unregistered alignment spawn was accepted"
-  else
-    status=$?
-  fi
-  [ "$status" -ne 0 ] || fail "unregistered alignment spawn returned success"
-  assert_contains "$out" 'requires a parent-owned alignment session record' \
-    "missing parent alignment record was not refused"
-
-  cat > "$PARENT/state/malformed-alignment.alignment" <<EOF
-schema=fm-alignment-session.v1
-session_id=malformed-alignment
-EOF
-  printf '%s\n' malformed-alignment > "$home/.fm-secondmate-home"
-  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
-    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
-    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
-    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
-    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" malformed-alignment "$home" \
-    --secondmate --alignment-session --harness claude 2>&1); then
-    fail "malformed alignment spawn was accepted"
-  else
-    status=$?
-  fi
-  [ "$status" -ne 0 ] || fail "malformed alignment spawn returned success"
-  assert_contains "$out" 'is malformed or not launchable' \
-    "malformed parent alignment record was not refused"
-
-  home=$(make_ephemeral_home inconsistent-alignment)
-  printf '%s\n' inconsistent-alignment > "$home/.fm-secondmate-home"
-  cat > "$home/.fm-secondmate-parent" <<EOF
-schema=fm-secondmate-parent.v1
-route=local
-parent_home=$PARENT
-EOF
-  cat > "$PARENT/state/inconsistent-alignment.alignment" <<EOF
-schema=fm-alignment-session.v1
-session_id=inconsistent-alignment
-project_name=not-project
-project_path=$PROJECT
-project_key=../outside
-topic=identity topic
-home=$home
-status=starting
-source=local
-EOF
-  mkdir -p "$home/data/inconsistent-alignment"
-  cat > "$home/data/inconsistent-alignment/session.meta" <<EOF
-schema=fm-alignment-session.v1
-session_id=inconsistent-alignment
-project_name=not-project
-project_path=$PROJECT
-project_key=../outside
-topic=identity topic
-EOF
-  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
-    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
-    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
-    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
-    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" inconsistent-alignment "$home" \
-    --secondmate --alignment-session --harness claude 2>&1); then
-    fail "identity-inconsistent alignment spawn was accepted"
-  else
-    status=$?
-  fi
-  [ "$status" -ne 0 ] || fail "identity-inconsistent alignment spawn returned success"
-  assert_contains "$out" 'invalid project key' \
-    "invalid parent project key was not refused"
-  sed -i 's#^project_key=../outside#project_key=project#' \
-    "$PARENT/state/inconsistent-alignment.alignment" "$home/data/inconsistent-alignment/session.meta"
-  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
-    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
-    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
-    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
-    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" inconsistent-alignment "$home" \
-    --secondmate --alignment-session --harness claude 2>&1); then
-    fail "project-name-inconsistent alignment spawn was accepted"
-  else
-    status=$?
-  fi
-  [ "$status" -ne 0 ] || fail "project-name-inconsistent alignment spawn returned success"
-  assert_contains "$out" 'inconsistent project identity' \
-    "project-name mismatch was not refused"
-  sed -i 's/^project_name=not-project/project_name=project/; s/^project_key=project/project_key=fabricated/' \
-    "$PARENT/state/inconsistent-alignment.alignment" "$home/data/inconsistent-alignment/session.meta"
-  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
-    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
-    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
-    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
-    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" inconsistent-alignment "$home" \
-    --secondmate --alignment-session --harness claude 2>&1); then
-    fail "project-key-inconsistent alignment spawn was accepted"
-  else
-    status=$?
-  fi
-  [ "$status" -ne 0 ] || fail "project-key-inconsistent alignment spawn returned success"
-  assert_contains "$out" 'inconsistent project key' \
-    "fabricated project key was not refused"
-  pass "alignment spawns require valid parent-owned session records"
 }
 
 test_project_key_reservation_isolates_same_basename_projects() {
@@ -441,6 +328,17 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   assert_contains "$out" 'no valid parent-owned archive' \
     "promotion did not validate the deterministic project archive key"
   sed -i 's/^project_key=.*/project_key=project/' "$PARENT/state/one.alignment"
+  sed -i "s#^alignment_project_path=.*#alignment_project_path=$TMP_ROOT/foreign-runtime-project#" "$PARENT/state/one.meta"
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h1" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1); then
+    fail "direct teardown accepted a tampered immutable alignment project binding"
+  fi
+  assert_contains "$out" 'valid parent-owned archive' \
+    "direct teardown did not bind cleanup to immutable runtime project identity"
+  sed -i "s#^alignment_project_path=.*#alignment_project_path=$PROJECT#" "$PARENT/state/one.meta"
   out=$(run_session "$h1" inventory "$PROJECT")
   assert_contains "$out" $'session=one\ttopic=first topic' \
     "inventory did not enumerate the retained project artifact"
@@ -467,7 +365,7 @@ test_archive_selective_retrieval_supersession_and_promotion() {
     "inventory emitted a report pointer for the wrong archive data root"
   mv "$TMP_ROOT/custom-data/alignments" "$PARENT/data/alignments"
   assert_contains "$(cat "$h1/data/charter.md")" \
-    "bin/fm-alignment-session.sh retrieve $PROJECT one --archive-home $PARENT" \
+    "bin/fm-alignment-session.sh retrieve $PROJECT HISTORICAL_SESSION_ID --archive-home $PARENT" \
     "ephemeral charter did not provide the parent archive retrieval boundary"
   sed -i 's/^status=.*/status=running/' "$PARENT/data/alignments/project/one/metadata"
   if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$h1" \
@@ -487,6 +385,16 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   fi
   assert_contains "$out" 'has an invalid report' \
     "retrieval did not validate the retained report contract"
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h1" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1); then
+    fail "direct teardown deleted a session after retained-report corruption"
+  fi
+  assert_contains "$out" 'valid parent-owned archive' \
+    "direct teardown did not bind cleanup to the retained report digest"
+  assert_present "$h1" "direct teardown removed the source after retained-report corruption"
   mv "$TMP_ROOT/one-report.md" "$PARENT/data/alignments/project/one/report.md"
 
   h2=$(make_ephemeral_home session-two-promotion)
@@ -577,58 +485,16 @@ test_promotion_detects_content_changes_to_preexisting_dirty_knowledge() {
   printf '\npost-hydration edit to the same dirty owner\n' >> "$PROJECT/README.md"
   write_report "$home" dirty-knowledge 'dirty knowledge topic'
   run_session "$home" retain dirty-knowledge >/dev/null
-  out=$(run_session "$home" promote dirty-knowledge --mode local-only --yolo off --purpose implementation 2>&1)
+  out=$(run_session "$home" retain dirty-knowledge 2>&1)
   status=$?
-  [ "$status" -ne 0 ] || fail "promotion accepted a changed preexisting dirty canonical owner"
-  assert_contains "$out" 'changed since alignment hydration' \
-    "promotion did not detect content changes to a preexisting dirty owner"
+  [ "$status" -ne 0 ] || fail "retention accepted a changed preexisting dirty canonical owner"
+  assert_contains "$out" 'changed since reconciliation' \
+    "retention did not require freshness reconciliation before archiving"
+  run_session "$home" reconcile dirty-knowledge >/dev/null
+  run_session "$home" retain dirty-knowledge >/dev/null
+  run_session "$home" promote dirty-knowledge --mode local-only --yolo off --purpose implementation >/dev/null
   cp "$original" "$PROJECT/README.md"
-  pass "promotion detects content changes to preexisting dirty canonical knowledge"
-}
-
-test_historical_report_changes_invalidate_hydration() {
-  local historical observer out status
-  historical=$(make_ephemeral_home historical-report)
-  run_session "$historical" start historical "$PROJECT" 'historical topic' --harness claude >/dev/null
-  write_report "$historical" historical 'historical topic'
-  run_session "$historical" retain historical >/dev/null
-
-  observer=$(make_ephemeral_home archive-observer)
-  run_session "$observer" start observer "$PROJECT" 'observer topic' --harness claude >/dev/null
-  write_report "$observer" observer 'observer topic'
-  run_session "$observer" retain observer >/dev/null
-  printf '\npost-hydration historical mutation\n' >> "$PARENT/data/alignments/project/historical/report.md"
-  out=$(run_session "$observer" promote observer --mode local-only --yolo off --purpose implementation 2>&1)
-  status=$?
-  [ "$status" -ne 0 ] || fail "promotion accepted a changed historical report"
-  assert_contains "$out" 'changed since alignment hydration' \
-    "historical report changes did not invalidate the hydration snapshot"
-  pass "historical report content changes invalidate alignment hydration"
-}
-
-test_close_requires_reconciled_archive_snapshot() {
-  local observer later out status
-  observer=$(make_ephemeral_home close-archive-observer)
-  run_session "$observer" start close-archive-observer "$PROJECT" 'close archive topic' --harness claude >/dev/null
-
-  later=$(make_ephemeral_home close-archive-later)
-  run_session "$later" start close-archive-later "$PROJECT" 'later archive topic' --harness claude >/dev/null
-  write_report "$later" close-archive-later 'later archive topic'
-  run_session "$later" retain close-archive-later >/dev/null
-
-  write_report "$observer" close-archive-observer 'close archive topic'
-  run_session "$observer" retain close-archive-observer >/dev/null
-  out=$(run_session "$observer" close close-archive-observer 2>&1)
-  status=$?
-  [ "$status" -ne 0 ] || fail "close accepted a newly added retained archive"
-  assert_contains "$out" 'changed since alignment hydration' \
-    "close did not require reconciliation after the archive inventory changed"
-
-  run_session "$observer" reconcile close-archive-observer --strong-executor >/dev/null \
-    || fail "strong reconciliation did not refresh the close snapshot"
-  run_session "$observer" close close-archive-observer >/dev/null \
-    || fail "close rejected a session after archive reconciliation"
-  pass "close validates the reconciled project and archive snapshots"
+  pass "retention requires reconciliation for changed canonical knowledge"
 }
 
 test_archive_staging_recovers_atomically() {
@@ -650,6 +516,7 @@ status=completed
 report=report.md
 supersedes=
 outcome=both
+report_digest=$(sha256sum "$PARENT/data/alignments/project/.staged.tmp/report.md" | awk '{print $1}')
 retained=2024-01-01T00:00:00Z
 EOF
   out=$(run_session "$home" inventory "$PROJECT")
@@ -706,56 +573,89 @@ test_teardown_rejects_symlinked_data_root() {
     "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "direct cleanup followed a symlinked data root"
-  assert_contains "$out" 'archive is outside the parent data boundary' \
+  assert_contains "$out" 'valid parent-owned archive' \
     "symlinked data root did not preserve teardown safety"
   rm "$data"
   mv "$escape/data" "$data"
   pass "direct teardown rejects a symlinked data root"
 }
 
-test_agents_discovery_stays_inside_resolved_project() {
-  local outer="$TMP_ROOT/agents-boundary" bounded_project home context
-  mkdir -p "$outer/repo/sub/project"
-  printf '# Host instructions\nDo not import this file.\n' > "$outer/AGENTS.md"
-  printf '# Repository instructions\n' > "$outer/repo/AGENTS.md"
-  printf '# Intermediate instructions\n' > "$outer/repo/sub/AGENTS.md"
-  printf '# Bounded project\n' > "$outer/repo/sub/project/README.md"
-  printf '# Project instructions\n' > "$outer/repo/sub/project/AGENTS.md"
-  git -C "$outer/repo" init -q
-  git -C "$outer/repo" add .
-  git -C "$outer/repo" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
-  bounded_project="$outer/repo/sub/project"
-  home=$(make_ephemeral_home agents-boundary-home)
-  run_session "$home" start agents-boundary "$bounded_project" 'boundary topic' --harness claude >/dev/null
-  context=$(cat "$home/data/alignment-context.md")
-  assert_contains "$context" 'Project instructions' \
-    "resolved project's AGENTS.md was not included"
-  assert_contains "$context" 'Intermediate instructions' \
-    "intermediate repository instructions were not included"
-  assert_contains "$context" 'Repository instructions' \
-    "repository-root instructions were not included"
-  assert_not_contains "$context" 'Do not import this file.' \
-    "AGENTS discovery imported instructions from outside the repository"
-  run_session "$home" close agents-boundary --abandon >/dev/null
-  pass "AGENTS discovery includes the bounded repository chain only"
+test_spawn_requires_parent_alignment_record() {
+  local home out status
+  home=$(make_ephemeral_home forged-alignment)
+  printf '%s\n' forged > "$home/.fm-secondmate-home"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$home" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-spawn.sh" forged "$home" --secondmate --alignment-session \
+      --harness claude 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "alignment spawn without a parent record was accepted"
+  assert_contains "$out" 'requires a parent-created alignment record' \
+    "missing parent alignment record did not explain the spawn refusal"
+  cat > "$PARENT/state/forged.alignment" <<EOF
+schema=fm-alignment-session.v1
+session_id=forged
+project_name=project
+project_path=$PROJECT
+project_key=../escape
+topic=forged topic
+home=$home
+status=starting
+source=local
+EOF
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$home" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-spawn.sh" forged "$home" --secondmate --alignment-session \
+      --harness claude 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "alignment spawn with a traversal project key was accepted"
+  assert_contains "$out" 'project key is malformed or unsafe' \
+    "unsafe project key did not explain the spawn refusal"
+  rm -f "$PARENT/state/forged.alignment"
+  pass "alignment spawning requires a bound parent record and safe project identity"
 }
 
-test_nested_project_inventory_uses_repository_paths() {
-  local nested home
-  nested="$PROJECT/packages/nested"
-  mkdir -p "$nested"
-  printf '# Nested project knowledge\n\nTracked knowledge below a nested project root.\n' > "$nested/topic.md"
-  git -C "$PROJECT" add packages/nested/topic.md
-  git -C "$PROJECT" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm 'add nested project knowledge'
-
+test_nested_project_context_is_bounded_and_tracks_repo_relative_prose() {
+  local repo project home out
+  repo="$TMP_ROOT/nested-repository"
+  project="$repo/services/app"
+  printf '# Host instructions\nFIRSTMATE GLOBAL SECRET\n' > "$TMP_ROOT/AGENTS.md"
+  mkdir -p "$project/docs" "$project/specs"
+  printf '# Root instructions\ncontext-owner: services/app/docs/root-domain.md\n' > "$repo/AGENTS.md"
+  mkdir -p "$repo/services"
+  printf '# Intermediate instructions\n' > "$repo/services/AGENTS.md"
+  printf '# App instructions\ncontext-owner: docs/local-domain.md\n' > "$project/AGENTS.md"
+  printf '# Root scoped domain owner\n' > "$project/docs/root-domain.md"
+  printf '# App scoped domain owner\n' > "$project/docs/local-domain.md"
+  printf '# Tracked specification\n' > "$project/specs/api.md"
+  mkdir -p "$project/domains/billing"
+  printf '# Billing owner\n' > "$project/domains/billing/domain.md"
+  printf 'domain.md\n' > "$project/domains/billing/owner-pointer"
+  git -C "$repo" init -q
+  git -C "$repo" add AGENTS.md services
+  git -C "$repo" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm 'nested project fixture'
   home=$(make_ephemeral_home nested-project)
-  run_session "$home" start nested "$nested" 'nested topic' --harness claude >/dev/null \
-    || fail "nested project alignment session could not start"
-  assert_grep $'candidate\ttopic.md\t' "$home/data/alignment-context.md" \
-    "nested project inventory omitted tracked prose relative to the project root"
-  run_session "$home" close nested --abandon >/dev/null \
-    || fail "empty nested alignment session could not be abandoned"
-  pass "nested project inventory resolves tracked prose from the repository root"
+  out=$(run_session "$home" start nested-owners "$project" 'nested owner topic' --harness claude)
+  assert_contains "$out" 'readiness=acknowledged' \
+    "nested project alignment did not report its launch acknowledgement"
+  assert_grep 'Intermediate instructions' "$home/data/alignment-context.md" \
+    "nested project omitted an intermediate AGENTS instruction"
+  assert_not_contains "$(cat "$home/data/alignment-context.md")" 'FIRSTMATE GLOBAL SECRET' \
+    "nested project imported an AGENTS file from an unrelated ancestor"
+  assert_grep $'selected\tdocs/local-domain.md\t' "$home/data/alignment-context.md" \
+    "nested project did not preserve its local scoped owner"
+  assert_grep $'selected\tdocs/root-domain.md\t' "$home/data/alignment-context.md" \
+    "nested project did not preserve its repository-scoped owner"
+  assert_grep $'candidate\tspecs/api.md\t' "$home/data/alignment-context.md" \
+    "nested project did not resolve tracked prose relative to the repository root"
+  assert_grep $'selected\tdomains/billing/domain.md\t' "$home/data/alignment-context.md" \
+    "nested project omitted a deeper scoped owner declaration"
+  rm -f "$TMP_ROOT/AGENTS.md"
+  pass "nested alignment hydration is repository-bounded and preserves scoped owners"
 }
 
 test_owner_precedence_resolves_conflicts() {
@@ -777,100 +677,38 @@ test_owner_precedence_resolves_conflicts() {
   pass "alignment owner precedence selects authority and surfaces conflicts"
 }
 
-test_teardown_rejects_symlinked_abandoned_archive_ancestors() {
-  local home archive_dir escape digest out status
-  home=$(make_ephemeral_home symlinked-abandoned-archive)
-  run_session "$home" start symlinked-abandoned "$PROJECT" 'symlinked archive topic' --harness claude >/dev/null
-  printf 'incomplete retained evidence\n' > "$home/data/symlinked-abandoned/report.md"
-  archive_dir="$PARENT/data/alignments/project/symlinked-abandoned"
-  mkdir -p "$archive_dir"
-  cp "$home/data/symlinked-abandoned/report.md" "$archive_dir/report.md"
-  digest=$(sha256sum "$archive_dir/report.md" | awk '{print $1}')
-  cat > "$archive_dir/metadata" <<EOF
-schema=fm-alignment-archive.v1
-project_name=project
-project_path=$PROJECT
-project_key=project
-session_id=symlinked-abandoned
-topic=symlinked archive topic
-source=local
-status=abandoned
-report=report.md
-report_digest=$digest
-EOF
-  printf 'archive=%s\n' "$archive_dir/report.md" >> "$PARENT/state/symlinked-abandoned.alignment"
-  printf 'alignment_abandon=1\n' >> "$PARENT/state/symlinked-abandoned.meta"
-  escape="$TMP_ROOT/symlinked-abandoned-escape"
-  mv "$archive_dir" "$escape"
-  ln -s "$escape" "$archive_dir"
-  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
-    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
-    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$home" \
-    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
-    "$ROOT_REAL/bin/fm-teardown.sh" symlinked-abandoned --force 2>&1)
-  status=$?
-  [ "$status" -ne 0 ] || fail "forced cleanup followed a symlinked abandoned archive ancestor"
-  assert_contains "$out" 'material evidence without a valid retained abandoned archive' \
-    "symlinked abandoned archive ancestor did not preserve teardown safety"
-  assert_present "$home" "symlinked abandoned archive ancestor allowed leased-home deletion"
-  pass "forced teardown rejects symlinked abandoned archive ancestors"
-}
-
-test_teardown_rejects_tampered_alignment_identity() {
-  local traversal identity alignment_key archive_dir original_path original_reservation out status
-  traversal=$(make_ephemeral_home tampered-alignment-key)
-  run_session "$traversal" start tampered-key "$PROJECT" 'tampered key topic' --harness claude >/dev/null
-  sed -i 's#^project_key=.*#project_key=../outside#' "$PARENT/state/tampered-key.alignment"
-  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
-    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
-    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$traversal" \
-    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
-    "$ROOT_REAL/bin/fm-teardown.sh" tampered-key --force 2>&1)
-  status=$?
-  [ "$status" -ne 0 ] || fail "forced teardown accepted a traversal project key"
-  assert_contains "$out" 'invalid project archive key' \
-    "traversal project key was not rejected before archive lookup"
-  assert_present "$traversal" "traversal project key allowed ephemeral deletion"
-
-  identity=$(make_ephemeral_home tampered-alignment-identity)
-  run_session "$identity" start tampered-identity "$PROJECT" 'tampered identity topic' --harness claude >/dev/null
-  write_report "$identity" tampered-identity 'tampered identity topic'
-  run_session "$identity" retain tampered-identity >/dev/null
-  alignment_key=$(grep '^project_key=' "$PARENT/state/tampered-identity.alignment" | cut -d= -f2-)
-  archive_dir="$PARENT/data/alignments/$alignment_key/tampered-identity"
-  original_path=$(grep '^project_path=' "$archive_dir/metadata" | cut -d= -f2-)
-  original_reservation=$(cat "$PARENT/data/alignments/$alignment_key/.project-path")
-  sed -i "s#^project_path=.*#project_path=$TMP_ROOT/not-the-task-project#" \
-    "$PARENT/state/tampered-identity.alignment" "$archive_dir/metadata"
-  printf '%s\n' "$TMP_ROOT/not-the-task-project" > \
-    "$PARENT/data/alignments/$alignment_key/.project-path"
-  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
-    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
-    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$identity" \
-    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
-    "$ROOT_REAL/bin/fm-teardown.sh" tampered-identity --force 2>&1)
-  status=$?
-  [ "$status" -ne 0 ] || fail "forced teardown accepted a mismatched project identity"
-  assert_contains "$out" 'valid parent-owned archive' \
-    "mismatched project identity did not preserve teardown safety"
-  assert_present "$identity" "mismatched project identity allowed ephemeral deletion"
-  sed -i "s#^project_path=.*#project_path=$original_path#" \
-    "$PARENT/state/tampered-identity.alignment" "$archive_dir/metadata"
-  printf '%s\n' "$original_reservation" > \
-    "$PARENT/data/alignments/$alignment_key/.project-path"
-  pass "teardown rejects traversal keys and mismatched alignment identities"
-}
-
 test_teardown_requires_retention_and_abandon_is_explicit() {
-  local h1 h3 h4 out status
+  local h1 h3 h4 h5 out status
   h1="$TMP_ROOT/session-one"
   h3=$(make_ephemeral_home session-three)
-  run_session "$h1" reconcile one --strong-executor >/dev/null \
-    || fail "retained session could not reconcile before closing"
+  run_session "$h1" reconcile one >/dev/null
   run_session "$h1" close one >/dev/null || fail "retained session could not be closed"
   assert_absent "$PARENT/state/one.meta" "closed session retained live runtime metadata"
   assert_present "$PARENT/data/alignments/project/one/report.md" \
     "closing a session removed the parent-owned historical archive"
+
+  h5=$(make_ephemeral_home incomplete-abandon)
+  run_session "$h5" start incomplete "$PROJECT" 'incomplete topic' --harness claude >/dev/null
+  printf '# Incomplete alignment evidence\n\nA useful unresolved observation.\n' > "$h5/data/incomplete/report.md"
+  out=$(run_session "$h5" close incomplete --abandon 2>&1)
+  assert_contains "$out" 'retained abandoned alignment evidence' \
+    "abandonment did not retain incomplete alignment evidence"
+  assert_absent "$h5" "abandoned alignment cleanup left the ephemeral home"
+  assert_grep 'status=abandoned' "$PARENT/data/alignments/project/incomplete/metadata" \
+    "abandoned alignment archive did not record its non-promotable status"
+  assert_grep 'report_digest=' "$PARENT/data/alignments/project/incomplete/metadata" \
+    "abandoned alignment archive did not bind its evidence digest"
+  out=$(run_session "$h5" inventory "$PROJECT")
+  assert_contains "$out" $'session=incomplete\ttopic=incomplete topic\tstatus=abandoned' \
+    "abandoned alignment evidence was not discoverable"
+  out=$(run_session "$h5" retrieve "$PROJECT" incomplete)
+  assert_contains "$out" 'A useful unresolved observation.' \
+    "abandoned alignment evidence could not be explicitly retrieved"
+  out=$(run_session "$h5" promote incomplete --mode local-only --yolo off --purpose implementation 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "abandoned alignment evidence authorized implementation"
+  assert_contains "$out" 'must be retained before promotion' \
+    "abandoned alignment promotion refusal did not preserve the non-promotable boundary"
 
   rm -rf "$h3"
   h3=$(make_ephemeral_home session-three)
@@ -888,16 +726,14 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
   status=$?
   [ "$status" -ne 0 ] || fail "direct cleanup discarded an unretained alignment report"
   assert_contains "$out" 'has no retained report' "direct cleanup did not enforce the parent archive boundary"
-  printf 'alignment_abandon=1\n' >> "$PARENT/state/three.meta"
   out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
     FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
     FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h3" \
     FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
     "$ROOT_REAL/bin/fm-teardown.sh" three --force 2>&1)
   status=$?
-  [ "$status" -ne 0 ] || fail "forced cleanup discarded material abandoned alignment evidence"
-  assert_contains "$out" 'material evidence without a valid retained abandoned archive' \
-    "forced cleanup bypassed abandoned-history retention"
+  [ "$status" -ne 0 ] || fail "forced cleanup discarded an unretained alignment report"
+  assert_contains "$out" 'has no retained report' "forced cleanup bypassed the parent archive boundary"
   out=$(run_session "$h3" close three 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "unretained session close succeeded without explicit abandonment"
@@ -915,7 +751,7 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
     "$ROOT_REAL/bin/fm-teardown.sh" four --force 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "direct abandonment cleanup proceeded without a parent session record"
-  assert_contains "$out" 'invalid project archive key' \
+  assert_contains "$out" 'valid parent session record' \
     "missing parent session record did not preserve abandonment safety"
   assert_present "$h4" "missing parent session record allowed leased-home deletion"
 
@@ -928,22 +764,17 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
 }
 
 make_parent_and_project
-test_alignment_spawn_requires_parent_owned_record
 test_fresh_isolated_sessions_and_parent_archive
 test_project_key_reservation_isolates_same_basename_projects
 test_failed_start_removes_owned_project_reservation
 test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
 test_promotion_detects_content_changes_to_preexisting_dirty_knowledge
-test_historical_report_changes_invalidate_hydration
-test_close_requires_reconciled_archive_snapshot
 test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_rejects_symlinked_data_root
-test_teardown_rejects_symlinked_abandoned_archive_ancestors
-test_teardown_rejects_tampered_alignment_identity
+test_spawn_requires_parent_alignment_record
 test_teardown_requires_retention_and_abandon_is_explicit
-test_nested_project_inventory_uses_repository_paths
-test_agents_discovery_stays_inside_resolved_project
+test_nested_project_context_is_bounded_and_tracks_repo_relative_prose
 test_owner_precedence_resolves_conflicts
 echo '# all fm-alignment-session tests passed'

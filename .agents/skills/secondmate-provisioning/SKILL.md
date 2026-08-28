@@ -42,7 +42,7 @@ The `scope:` field is used during intake.
 The `projects:` field is a non-exclusive clone list, not ownership.
 Persistent Secondmates are not the default local alignment executor.
 Fresh local alignment uses `bin/fm-alignment-session.sh` for one project and one topic without adding a registry entry.
-Already-provisioned homes retain their direct alignment report commands only as compatibility for in-flight work, never as authority for ordinary implementation, surveys, audits, or self-directed work.
+Already-provisioned homes retain their direct alignment report commands as a non-default compatibility path when the captain explicitly requests direct alignment, never as authority for ordinary implementation, surveys, audits, or self-directed work.
 
 ## Charter and seed
 

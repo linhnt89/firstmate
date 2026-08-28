@@ -28,8 +28,10 @@
 # durable-knowledge-candidates section before the parent archives the report.
 # `complete-direct` validates that report, resolves the locally seeded parent
 # from .fm-secondmate-parent and .fm-secondmate-home, and appends a keyed,
-# uncorrelated document pointer to the parent's status stream. Parent-routed
-# marked requests continue to use fm-secondmate-report.sh with corr=<id>.
+# uncorrelated document pointer to the parent's status stream. This remains the
+# non-default compatibility path for already-provisioned persistent Secondmates;
+# new local alignment uses fm-alignment-session.sh. Parent-routed marked requests
+# continue to use fm-secondmate-report.sh with corr=<id>.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

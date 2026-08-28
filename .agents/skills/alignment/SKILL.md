@@ -52,8 +52,9 @@ Firstmate owns routing, archive retention, and cleanup, but must not relay or re
 Ordinary implementation crewmates remain non-captain-facing.
 
 The session charter contains the current project knowledge first and a compact deterministic inventory of retained alignment metadata second.
+The owner index is repository-bounded, preserves non-conflicting scoped owners, and surfaces incompatible same-scope declarations instead of silently choosing among them.
 It does not load every historical report, and Firstmate does not rank report bodies semantically.
-The executor may explicitly retrieve one relevant historical report with `bin/fm-alignment-session.sh retrieve <project> <session-id>`.
+The executor may explicitly retrieve one relevant historical report with `bin/fm-alignment-session.sh retrieve <project> <historical-session-id> --archive-home <parent-home>`.
 The session can read the resolved project's repository and documentation, but its charter forbids project edits, commits, pushes, and direct knowledge promotion.
 
 The executor writes the outcome, never a transcript, to `data/<session-id>/report.md`.
@@ -63,7 +64,10 @@ The final open-decision section must explicitly say `None - no material open dec
 
 The executor then uses the existing uncorrelated `complete-direct` pointer for a direct local session, or the existing correlated `fm-secondmate-report.sh --doc` route for a marked request.
 The parent runs `bin/fm-alignment-session.sh retain <session-id>` and must durably copy the validated report into its project archive before cleanup.
+Retention and cleanup require the project and archive inventory to match the last reconciled snapshot; the parent refreshes both with `bin/fm-alignment-session.sh reconcile <session-id>` when they change.
+A non-empty incomplete abandonment is retained as explicitly abandoned historical evidence and cannot authorize implementation, while an empty scratch session may be closed without an archive.
 `inventory` reads archive metadata only, while `retrieve` is the explicit body-read operation.
+A successful fresh launch records an observable launch acknowledgement after endpoint and brief delivery confirmation.
 
 A later report may pass `--supersedes <session-id>` to `retain`.
 The earlier report remains immutable historical evidence, while any current-knowledge or ADR change is only a candidate until Firstmate routes a normal authorized project task.
@@ -72,7 +76,7 @@ Use `bin/fm-alignment-session.sh promote` to compile the accepted outcome into a
 If the captain owns a remaining choice, use `bin/fm-captain-hold.sh hold` in the home that owns the work, report the keyed decision, and stop the alignment completion path until the captain's actual answer is recorded.
 Do not report a complete alignment while a material captain-held decision remains open.
 
-Already-provisioned persistent Secondmates retain the legacy `bin/fm-alignment.sh start` and `complete-direct` compatibility path for in-flight work only.
+Already-provisioned persistent Secondmates retain the non-default `bin/fm-alignment.sh start` and `complete-direct` compatibility path when the captain explicitly requests direct alignment.
 New local alignment intake must use the fresh session path above rather than assuming or provisioning a persistent Secondmate.
 
 ## External specialist path

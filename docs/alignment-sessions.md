@@ -7,25 +7,32 @@ The configured alignment harness, model, and effort are read from the captain-pr
 ## Lifecycle
 
 The session receives the AGENTS instruction chain and a compact, deterministic index of current documentation owners first, followed by a compact, deterministic metadata inventory of prior alignments.
+The AGENTS chain is bounded by the resolved repository root, and tracked prose paths are resolved relative to that root before being scoped to the project.
 `context-owner:` and `owner-pointer:` declarations in the project AGENTS chain, plus optional project-local pointer files, identify explicit owners before fallback document candidates.
 Candidates are not treated as authoritative.
 Existing authoritative owners and this owner chain take precedence.
+Multiple non-conflicting owner scopes are preserved.
+Within one scope, the declared owner precedence is AGENTS, context-owner, then owner-pointer; incompatible same-precedence owners are surfaced as conflicts rather than selected silently.
 No pointer file is required.
 The strong executor lazily inspects relevant indexed owners before declaring readiness.
 Large required owners remain navigable at their project paths without silent omission or truncation, and audience labels do not determine authority.
 The inventory contains no historical report bodies, and Firstmate does not semantically rank them.
 The executor may use `bin/fm-alignment-session.sh retrieve <project> <session-id> --archive-home <parent-home>` for one explicitly relevant historical report, using the parent Firstmate home that owns the archive.
 When the parent uses a configured alternate data root, the command also passes `--archive-data <parent-data-root>`.
+The generic retrieval shape is `bin/fm-alignment-session.sh retrieve <project> <historical-session-id> --archive-home <parent-home> --archive-data <parent-data-root>` after inventory identifies a relevant prior session.
+A fresh launch records an observable launch acknowledgement after the worker endpoint and brief delivery have been confirmed.
+If project knowledge or the historical inventory changes before the report is retained or the home is closed, run `bin/fm-alignment-session.sh reconcile <session-id>` and complete the alignment against that refreshed snapshot.
 
 The executor writes a validated report rather than a transcript.
 The report identifies the project, session, topic, source, and the existing alignment sections, followed by a separate durable-knowledge-candidates section.
 A direct local executor returns through the existing uncorrelated `bin/fm-alignment.sh complete-direct` pointer.
 A marked external or parent-routed request continues to use the existing correlated GitHub handoff and status protocol.
 
-Firstmate retains a completed report with `bin/fm-alignment-session.sh retain` in `data/alignments/<project-key>/<session-id>/` before `close` removes the ephemeral home.
+Firstmate retains a completed report with `bin/fm-alignment-session.sh retain` in `data/alignments/<project>/<session>/` before `close` removes the ephemeral home.
+Archive metadata binds the retained report content digest and the project, session, topic, and archive-key identities before cleanup can proceed.
 `inventory` enumerates only retained metadata for one project, so historical artifacts are deterministic and project-associated.
-Promotion and close bind to the hydration snapshot. If the project or archive inventory changes, the authorized strong executor must run `reconcile <session-id> --strong-executor`, which refreshes the snapshot before either operation can continue.
-A close without a retained completed report is refused unless Firstmate explicitly closes an abandoned session with `--abandon`; material incomplete reports are retained as abandoned history and can never authorize implementation.
+A close without a retained completed report is refused unless Firstmate explicitly closes an abandoned session with `--abandon`.
+Abandonment retains non-empty incomplete evidence as an explicitly abandoned, discoverable, non-promotable archive before cleanup; a truly empty scratch session may close without an archive.
 
 ## Knowledge layers
 
@@ -40,12 +47,14 @@ An ADR or equivalent current decision record is reserved for a consequential, di
 A durable-knowledge candidate in a report is only a proposal and is not an ADR or canonical domain knowledge.
 
 Implementation artifacts are ordinary briefs, branches, tests, and project changes produced through the selected delivery path.
+Historical reports are immutable evidence, canonical domain knowledge describes current terminology and semantics, ADRs preserve consequential decision rationale, and implementation artifacts are delivered code-work products; none substitutes for another.
 `bin/fm-alignment-session.sh promote` compiles the accepted report into an ordinary ship brief without editing project documentation or launching a captain-facing implementation worker.
 Knowledge promotion therefore receives normal project review, validation, delivery, and merge authority.
 
 ## Supersession
 
 A later retained session may name an earlier session with `--supersedes`.
+Before retention, the parent requires the project and archive inventory to match the last reconciled snapshot.
 The earlier report remains unchanged in the archive, while the later report and archive metadata identify the historical relationship.
 Updating current project knowledge is a separate authorized project task and never a direct write from the alignment session.
 

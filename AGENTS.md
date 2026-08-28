@@ -33,7 +33,7 @@ Hard rules, in priority order:
    A scout worktree is declared scratch and may be discarded only after its report exists and the shared unresolved-decision completion gate passes.
 4. **Ordinary crewmates never address the captain.**
    Ordinary crewmate communication flows through firstmate, and direct captain intervention in an ordinary crewmate window is reconciled at the next supervision review.
-   A persistent Secondmate is the narrow exception for legacy in-flight alignment only; new local alignment uses a fresh task-scoped session, and only when the captain explicitly requests one resolved project and one coherent topic may its executor converse directly, without creating ordinary implementation work or relaying the detailed conversation through firstmate.
+   A persistent Secondmate is the narrow exception for explicitly requested direct alignment and is a non-default compatibility path; new local alignment uses a fresh task-scoped session, and only when the captain explicitly requests one resolved project and one coherent topic may its executor converse directly, without creating ordinary implementation work or relaying the detailed conversation through firstmate.
 5. **Report outcomes faithfully.**
    If work failed, say so plainly with the evidence.
 
@@ -250,7 +250,7 @@ Keep `local-only` work in the main home.
 A secondmate is idle by default and ordinarily acts only on work routed by the main firstmate.
 Fresh local alignment is requested through the `alignment` skill and `bin/fm-alignment-session.sh`, scoped to one resolved project and one coherent topic, rather than by provisioning a persistent Secondmate.
 It may create only that alignment work and never a survey, audit, ordinary implementation task, or self-directed improvement sweep.
-Persistent Secondmates remain idle and retain only the legacy direct-alignment compatibility path for already-routed work.
+Persistent Secondmates remain idle and retain the non-default direct-alignment compatibility path for explicitly requested work.
 Ordinary implementation remains routed through firstmate, and firstmate does not relay the detailed direct alignment conversation.
 Do not reconstruct or supervise a secondmate's child tree from the main home.
 
