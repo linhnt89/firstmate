@@ -8,6 +8,7 @@
 #   fm-alignment-session.sh inventory <project>
 #   fm-alignment-session.sh retrieve <project> <session-id> [--archive-home <parent-home>] [--archive-data <data-root>]
 #   fm-alignment-session.sh promote <session-id> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--purpose <implementation|knowledge-only|both>] [--task-id <id>]
+#   fm-alignment-session.sh reconcile <session-id> --strong-executor
 #   fm-alignment-session.sh close <session-id> [--abandon]
 #
 # `start` leases a fresh firstmate worktree, marks it as an ephemeral alignment
@@ -224,7 +225,7 @@ published_archive_metadata_valid() {
   [ "$(read_record_field "$meta" project_path || true)" = "$project" ] || return 1
   [ "$(read_record_field "$meta" project_key || true)" = "$key" ] || return 1
   [ "$(read_record_field "$meta" session_id || true)" = "$sid" ] || return 1
-  [ "$(read_record_field "$meta" status || true)" = completed ] || return 1
+  case "$(read_record_field "$meta" status || true)" in completed|abandoned) ;; *) return 1 ;; esac
   [ "$(read_record_field "$meta" report || true)" = report.md ] || return 1
   outcome=$(read_record_field "$meta" outcome || true)
   case "$outcome" in implementation|knowledge-only|both|neither) ;; *) return 1 ;; esac
@@ -278,6 +279,7 @@ project_status_digest() {
       digest=$(file_content_digest "$file") || exit 1
       printf '%s\t%s\n' "$file" "$digest"
     done
+    printf 'git-status\\t%s\\n' "$(git -C "$project" status --porcelain=v1 --untracked-files=all)"
   ) || return 1
   hash_text "$snapshot"
 }
@@ -333,6 +335,8 @@ retained_archive_valid() {
   [ "$(read_record_field "$meta" project_path || true)" = "$SESSION_PROJECT_PATH" ] || return 1
   [ "$(read_record_field "$meta" project_key || true)" = "$SESSION_PROJECT_KEY" ] || return 1
   [ "$(read_record_field "$meta" status || true)" = completed ] || return 1
+  [ -n "$(read_record_field "$meta" report_digest || true)" ] || return 1
+  [ "$(file_content_digest "$expected_report")" = "$(read_record_field "$meta" report_digest || true)" ] || return 1
   case "$(read_record_field "$meta" outcome || true)" in
     implementation|knowledge-only|both|neither) ;;
     *) return 1 ;;
@@ -390,20 +394,26 @@ alignment_config() {
 }
 
 canonical_document_paths() {
-  local project=$1
-  if [ -d "$project/docs" ] && [ ! -L "$project/docs" ]; then
-    find "$project/docs" -type f ! -name '*.report.md' -print
-  fi
-  find "$project" -maxdepth 1 -type f \( -name '*.md' -o -name '*.mdx' -o -name '*.rst' -o -name '*.adoc' -o -name '*.txt' \) -print
+  local project=$1 file relative
+  while IFS= read -r -d '' relative; do
+    case "$relative" in
+      *.md|*.mdx|*.rst|*.adoc|*.txt)
+        case "$relative" in *.report.md) continue ;; esac
+        file="$project/$relative"
+        [ -f "$file" ] && [ ! -L "$file" ] && printf '%s\n' "$file"
+        ;;
+    esac
+  done < <(git -C "$project" ls-files -z -- ':!*.report.md')
 }
 
 canonical_owner_declaration_sources() {
   local project=$1 current=$1 file
-  while [ "$current" != / ]; do
+  while :; do
     file="$current/AGENTS.md"
     if [ -f "$file" ] && [ ! -L "$file" ]; then
       printf '%s\n' "$file"
     fi
+    [ "$current" = "$project" ] && break
     current=$(dirname "$current")
   done
   find "$project" -maxdepth 2 -type f \( \
@@ -485,11 +495,12 @@ canonical_document_title() {
 write_agents_chain() {
   local project=$1 current=$1 file
   local -a chain=()
-  while [ "$current" != / ]; do
+  while :; do
     file="$current/AGENTS.md"
     if [ -f "$file" ] && [ ! -L "$file" ]; then
       chain+=("$file")
     fi
+    [ "$current" = "$project" ] && break
     current=$(dirname "$current")
   done
   for ((current=${#chain[@]}-1; current>=0; current--)); do
@@ -985,6 +996,8 @@ retain_session() {
       fail "alignment archive staging path has a different outcome"
     fi
     outcome="$staged_outcome"
+    [ -n "$(read_record_field "$tmp" report_digest || true)" ] ||
+      record_set "$tmp" report_digest "$(file_content_digest "$source_report")"
   else
     mkdir "$archive_tmp"
     RETENTION_TMP="$archive_tmp"
@@ -1012,9 +1025,9 @@ EOF
       "$SESSION_PROJECT_NAME" "$SESSION_PROJECT_PATH" "$SESSION_PROJECT_KEY"
     printf 'session_id=%s\ntopic=%s\nsource=local\nstatus=completed\nreport=report.md\n' \
       "$SESSION_ID" "$SESSION_TOPIC"
-    printf 'supersedes=%s\noutcome=%s\nretained=%s\n' \
+    printf 'supersedes=%s\noutcome=%s\nreport_digest=%s\nretained=%s\n' \
       "$(IFS=,; printf '%s' "${superseded_ids[*]:-}")" "$outcome" \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      "$(file_content_digest "$source_report")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$tmp"
   fi
   [ ! -e "$archive_dir" ] && [ ! -L "$archive_dir" ] \
@@ -1059,7 +1072,7 @@ inventory_session() {
 }
 
 retrieve_session() {
-  local project_input sid project project_name key meta archive report topic outcome archive_home='' archive_data='' archive_data_set=0
+  local project_input sid project project_name key meta archive report topic outcome status archive_home='' archive_data='' archive_data_set=0
   [ "$#" -ge 2 ] || usage
   project_input=$1
   sid=$2
@@ -1099,8 +1112,8 @@ retrieve_session() {
     || fail "alignment $sid has an invalid archive key"
   [ "$(read_record_field "$meta" session_id || true)" = "$sid" ] \
     || fail "alignment $sid has an invalid session identity"
-  [ "$(read_record_field "$meta" status || true)" = completed ] \
-    || fail "alignment $sid is not completed"
+  status=$(read_record_field "$meta" status || true)
+  case "$status" in completed|abandoned) ;; *) fail "alignment $sid is not completed or explicitly abandoned" ;; esac
   outcome=$(read_record_field "$meta" outcome || true)
   case "$outcome" in
     implementation|knowledge-only|both|neither) ;;
@@ -1114,14 +1127,48 @@ retrieve_session() {
   archive_path_safe "$archive"
   report="$archive/report.md"
   [ -f "$report" ] && [ ! -L "$report" ] || fail "retained alignment $sid has no report"
-  "$SCRIPT_DIR/fm-alignment.sh" validate-report "$report" --complete \
-    --session "$sid" --project "$project_name" >/dev/null \
-    || fail "retained alignment $sid has an invalid report"
-  grep -Fqx "Path: $project" "$report" \
-    || fail "retained alignment $sid report has an invalid project path"
-  grep -Fqx "Topic: $topic" "$report" \
-    || fail "retained alignment $sid report has an invalid topic"
+  if [ "$status" = completed ]; then
+    "$SCRIPT_DIR/fm-alignment.sh" validate-report "$report" --complete \
+      --session "$sid" --project "$project_name" >/dev/null \
+      || fail "retained alignment $sid has an invalid report"
+    grep -Fqx "Path: $project" "$report" \
+      || fail "retained alignment $sid report has an invalid project path"
+    grep -Fqx "Topic: $topic" "$report" \
+      || fail "retained alignment $sid report has an invalid topic"
+  fi
   cat "$report"
+}
+
+reconcile_session() {
+  local id=${1:-} strong=0 head status_digest inventory
+  require_parent_home
+  [ -n "$id" ] || usage
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --strong-executor) strong=1; shift ;;
+      *) usage ;;
+    esac
+  done
+  [ "$strong" -eq 1 ] || fail "reconciliation requires explicit --strong-executor authorization"
+  id_valid "$id" || fail "invalid alignment session id: $id"
+  mkdir -p "$STATE"
+  lock_dir "$STATE/.alignment-session-$id.lock"
+  session_load "$id"
+  [ "$SESSION_STATUS" = completed ] || fail "alignment $id must be retained before reconciliation"
+  retained_archive_valid || fail "alignment $id has no valid parent-owned archive"
+  head=$(git -C "$SESSION_PROJECT_PATH" rev-parse HEAD 2>/dev/null) \
+    || fail "could not read the project's current commit"
+  status_digest=$(project_status_digest "$SESSION_PROJECT_PATH") \
+    || fail "could not read the project's current status"
+  inventory=$(hydration_archive_inventory_digest "$SESSION_PROJECT_PATH" "$SESSION_ID") \
+    || fail "could not refresh the parent alignment inventory"
+  record_set "$SESSION_RECORD" project_head "$head"
+  record_set "$SESSION_RECORD" project_status_digest "$status_digest"
+  record_set "$SESSION_RECORD" hydration_project_head "$head"
+  record_set "$SESSION_RECORD" hydration_project_status_digest "$status_digest"
+  record_set "$SESSION_RECORD" hydration_archive_inventory_digest "$inventory"
+  printf 'reconciled alignment session %s against current project and archive snapshots\\n' "$id"
 }
 
 promote_session() {
@@ -1196,6 +1243,32 @@ promote_session() {
   printf 'created ordinary project follow-up %s at %s\n' "$task_id" "$brief"
 }
 
+retain_abandoned_session() {
+  local report archive_dir archive_tmp meta
+  report="$SESSION_HOME/data/$SESSION_ID/report.md"
+  [ -f "$report" ] && [ ! -L "$report" ] || return 0
+  archive_dir=$(archive_dir_for "$SESSION_PROJECT_KEY" "$SESSION_ID")
+  [ ! -e "$archive_dir" ] && [ ! -L "$archive_dir" ] || fail "alignment $SESSION_ID already has an archive"
+  safe_dir "$(archive_root_for "$SESSION_PROJECT_KEY")"
+  archive_tmp="$(dirname "$archive_dir")/.$SESSION_ID.tmp"
+  [ ! -e "$archive_tmp" ] && [ ! -L "$archive_tmp" ] || fail "alignment abandonment archive staging path already exists"
+  mkdir "$archive_tmp"
+  cp -- "$report" "$archive_tmp/report.md"
+  meta="$archive_tmp/metadata"
+  {
+    printf 'schema=fm-alignment-archive.v1\\n'
+    printf 'project_name=%s\\nproject_path=%s\\nproject_key=%s\\n' \
+      "$SESSION_PROJECT_NAME" "$SESSION_PROJECT_PATH" "$SESSION_PROJECT_KEY"
+    printf 'session_id=%s\\ntopic=%s\\nsource=local\\nstatus=abandoned\\nreport=report.md\\n' \
+      "$SESSION_ID" "$SESSION_TOPIC"
+    printf 'supersedes=\\noutcome=neither\\nimplementation_ready=0\\nreport_digest=%s\\nretained=%s\\n' \
+      "$(file_content_digest "$archive_tmp/report.md")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$meta"
+  mv -- "$archive_tmp" "$archive_dir"
+  record_set "$SESSION_RECORD" archive "$archive_dir/report.md"
+  record_set "$SESSION_RECORD" abandonment_archive 1
+}
+
 close_session() {
   local abandon=0 id=${1:-}
   require_parent_home
@@ -1222,6 +1295,9 @@ close_session() {
   fi
   project_unchanged || fail "project changed during alignment; inspect it before closing the session"
   if [ "$abandon" -eq 1 ] && [ "$SESSION_STATUS" != completed ]; then
+    retain_abandoned_session
+  fi
+  if [ "$abandon" -eq 1 ] && [ "$SESSION_STATUS" != completed ]; then
     [ -f "$STATE/$id.meta" ] && [ ! -L "$STATE/$id.meta" ] \
       || fail "alignment $id has no live runtime record to close"
     record_set "$STATE/$id.meta" alignment_abandon 1
@@ -1239,6 +1315,7 @@ case "$COMMAND" in
   retain|archive) retain_session "$@" ;;
   inventory|list) [ "$#" -eq 1 ] || usage; inventory_session "$1" ;;
   retrieve|show) retrieve_session "$@" ;;
+  reconcile|refresh) reconcile_session "$@" ;;
   promote|compile) promote_session "$@" ;;
   close|cancel) close_session "$@" ;;
   *) usage ;;

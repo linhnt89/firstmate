@@ -751,7 +751,26 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
   ALIGNMENT_METADATA_PROJECT_KEY=$(grep '^project_key=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_STATUS=$(grep '^status=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_REPORT=$(grep '^report=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_DIGEST=$(grep '^report_digest=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  alignment_complete_report_valid() {
+    local digest
+    [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] || return 1
+    [ -f "$ALIGNMENT_ARCHIVE" ] && [ ! -L "$ALIGNMENT_ARCHIVE" ] || return 1
+    [ -n "$ALIGNMENT_METADATA_DIGEST" ] || return 1
+    if command -v sha256sum >/dev/null 2>&1; then
+      digest=$(sha256sum -- "$ALIGNMENT_ARCHIVE" | awk '{print $1}')
+    else
+      digest=$(shasum -a 256 -- "$ALIGNMENT_ARCHIVE" | awk '{print $1}')
+    fi
+    [ "$digest" = "$ALIGNMENT_METADATA_DIGEST" ] || return 1
+    "$FM_ROOT/bin/fm-alignment.sh" validate-report "$ALIGNMENT_ARCHIVE" --complete \
+      --session "$ID" --project "$ALIGNMENT_PROJECT_NAME" >/dev/null 2>&1
+  }
   if [ "$ALIGNMENT_STATUS" = completed ]; then
+    alignment_complete_report_valid || {
+      echo "REFUSED: ephemeral alignment $ID retained report failed complete validation or digest verification" >&2
+      exit 1
+    }
     [ -f "$ALIGNMENT_RECORD" ] && [ ! -L "$ALIGNMENT_RECORD" ] \
       && [ "$(grep '^session_id=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" = "$ID" ] \
       && [ -n "$ALIGNMENT_PROJECT_NAME" ] \
