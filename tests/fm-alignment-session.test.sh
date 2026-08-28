@@ -671,14 +671,16 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
   status=$?
   [ "$status" -ne 0 ] || fail "direct cleanup discarded an unretained alignment report"
   assert_contains "$out" 'has no retained report' "direct cleanup did not enforce the parent archive boundary"
+  printf 'alignment_abandon=1\n' >> "$PARENT/state/three.meta"
   out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
     FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
     FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$h3" \
     FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
     "$ROOT_REAL/bin/fm-teardown.sh" three --force 2>&1)
   status=$?
-  [ "$status" -ne 0 ] || fail "forced cleanup discarded an unretained alignment report"
-  assert_contains "$out" 'has no retained report' "forced cleanup bypassed the parent archive boundary"
+  [ "$status" -ne 0 ] || fail "forced cleanup discarded material abandoned alignment evidence"
+  assert_contains "$out" 'material evidence without a valid retained abandoned archive' \
+    "forced cleanup bypassed abandoned-history retention"
   out=$(run_session "$h3" close three 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "unretained session close succeeded without explicit abandonment"

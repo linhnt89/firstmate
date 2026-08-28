@@ -766,6 +766,40 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
     "$FM_ROOT/bin/fm-alignment.sh" validate-report "$ALIGNMENT_ARCHIVE" --complete \
       --session "$ID" --project "$ALIGNMENT_PROJECT_NAME" >/dev/null 2>&1
   }
+  alignment_abandoned_report_valid() {
+    local digest
+    [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] || return 1
+    [ -f "$ALIGNMENT_ARCHIVE" ] && [ ! -L "$ALIGNMENT_ARCHIVE" ] || return 1
+    [ -f "$ALIGNMENT_METADATA" ] && [ ! -L "$ALIGNMENT_METADATA" ] || return 1
+    if ! {
+      [ "$ALIGNMENT_METADATA_SESSION" = "$ID" ]
+      [ "$ALIGNMENT_METADATA_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME" ]
+      [ "$ALIGNMENT_METADATA_PROJECT_PATH" = "$ALIGNMENT_PROJECT_PATH" ]
+      [ "$ALIGNMENT_METADATA_PROJECT_KEY" = "$ALIGNMENT_PROJECT_KEY" ]
+      [ "$ALIGNMENT_METADATA_STATUS" = abandoned ]
+      [ "$ALIGNMENT_METADATA_REPORT" = report.md ]
+      [ -n "$ALIGNMENT_METADATA_DIGEST" ]
+    }; then
+      return 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+      digest=$(sha256sum -- "$ALIGNMENT_ARCHIVE" | awk '{print $1}')
+    else
+      digest=$(shasum -a 256 -- "$ALIGNMENT_ARCHIVE" | awk '{print $1}')
+    fi
+    [ "$digest" = "$ALIGNMENT_METADATA_DIGEST" ]
+  }
+  alignment_material_evidence_present() {
+    local evidence
+    [ -d "$HOME_PATH/data/$ID" ] && [ ! -L "$HOME_PATH/data/$ID" ] || return 1
+    while IFS= read -r -d '' evidence; do
+      case "$(basename "$evidence")" in
+        alignment-context.md|charter.md|session.meta) continue ;;
+      esac
+      return 0
+    done < <(find "$HOME_PATH/data/$ID" -mindepth 1 ! -type d -print0 2>/dev/null)
+    return 1
+  }
   if [ "$ALIGNMENT_STATUS" = completed ]; then
     alignment_complete_report_valid || {
       echo "REFUSED: ephemeral alignment $ID retained report failed complete validation or digest verification" >&2
@@ -808,6 +842,10 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
     || [ "$(grep '^home=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != "$HOME_PATH" ] \
     || { [ "$ALIGNMENT_STATUS" != starting ] && [ "$ALIGNMENT_STATUS" != running ]; }; then
     echo "REFUSED: ephemeral alignment $ID has no valid parent session record for abandonment" >&2
+    exit 1
+  fi
+  if alignment_material_evidence_present && ! alignment_abandoned_report_valid; then
+    echo "REFUSED: ephemeral alignment $ID has material evidence without a valid retained abandoned archive" >&2
     exit 1
   fi
 fi
