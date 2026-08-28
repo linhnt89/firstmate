@@ -22,7 +22,7 @@ The report identifies the project, session, topic, source, and the existing alig
 A direct local executor returns through the existing uncorrelated `bin/fm-alignment.sh complete-direct` pointer.
 A marked external or parent-routed request continues to use the existing correlated GitHub handoff and status protocol.
 
-Firstmate retains a completed report with `bin/fm-alignment-session.sh retain` in `data/alignments/<project>/<session>/` before `close` removes the ephemeral home.
+Firstmate retains a completed report with `bin/fm-alignment-session.sh retain` in `data/alignments/<project-key>/<session-id>/` before `close` removes the ephemeral home.
 `inventory` enumerates only retained metadata for one project, so historical artifacts are deterministic and project-associated.
 Promotion and close bind to the hydration snapshot. If the project or archive inventory changes, the authorized strong executor must run `reconcile <session-id> --strong-executor`, which refreshes the snapshot before either operation can continue.
 A close without a retained completed report is refused unless Firstmate explicitly closes an abandoned session with `--abandon`; material incomplete reports are retained as abandoned history and can never authorize implementation.
