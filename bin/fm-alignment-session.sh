@@ -421,12 +421,27 @@ canonical_document_paths() {
   done < <(git -C "$project" ls-files -z -- ':!*.report.md')
 }
 
+canonical_agents_sources() {
+  local project=$1 root current parent file
+  root=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null || true)
+  [ -n "$root" ] || return 0
+  current=$project
+  while :; do
+    file="$current/AGENTS.md"
+    if [ -f "$file" ] && [ ! -L "$file" ]; then
+      printf '%s\n' "$file"
+    fi
+    [ "$current" = "$root" ] && break
+    parent=$(dirname -- "$current")
+    [ "$parent" != "$current" ] || break
+    case "$parent/" in "$root/"*) ;; *) break ;; esac
+    current=$parent
+  done
+}
+
 canonical_owner_declaration_sources() {
-  local project=$1 file
-  file="$project/AGENTS.md"
-  if [ -f "$file" ] && [ ! -L "$file" ]; then
-    printf '%s\n' "$file"
-  fi
+  local project=$1
+  canonical_agents_sources "$project"
   find "$project" -maxdepth 2 -type f \( \
     -name '.context-owner' -o -name 'context-owner' -o \
     -name '.owner-pointer' -o -name 'owner-pointer' \
@@ -435,7 +450,7 @@ canonical_owner_declaration_sources() {
 
 canonical_owner_declarations_from_source() {
   local project=$1 source=$2 base declarations declaration candidate root
-  root=$project
+  root=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$project")
   case "$(basename "$source")" in
     .context-owner|context-owner|.owner-pointer|owner-pointer)
       base=$(dirname "$source")
@@ -505,12 +520,12 @@ canonical_document_title() {
 }
 
 write_agents_chain() {
-  local file="$1/AGENTS.md"
-  if [ -f "$file" ] && [ ! -L "$file" ]; then
-    printf '\n### AGENTS chain: AGENTS.md\n\n'
+  local project=$1 file
+  while IFS= read -r file; do
+    printf '\n### AGENTS chain: %s\n\n' "${file#"$project"/}"
     cat "$file"
     printf '\n'
-  fi
+  done < <(canonical_agents_sources "$project")
 }
 
 write_canonical_context() {
