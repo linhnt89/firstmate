@@ -26,12 +26,14 @@
 # persistent Secondmate homes. New local sessions are managed by
 # fm-alignment-session.sh, which adds project/session identity and a separate
 # durable-knowledge-candidates section before the parent archives the report.
-# `complete-direct` validates that report, resolves the locally seeded parent
-# from .fm-secondmate-parent and .fm-secondmate-home, and appends a keyed,
-# uncorrelated document pointer to the parent's status stream. This remains the
-# non-default compatibility path for already-provisioned persistent Secondmates;
-# new local alignment uses fm-alignment-session.sh. Parent-routed marked requests
-# continue to use fm-secondmate-report.sh with corr=<id>.
+# `complete-direct` validates that report, requires an executor-authenticated
+# semantic-readiness acknowledgement for an on-demand session, resolves the
+# locally seeded parent from .fm-secondmate-parent and .fm-secondmate-home, and
+# appends a keyed, uncorrelated document pointer to the parent's status stream.
+# This remains the non-default compatibility path for already-provisioned
+# persistent Secondmates; new local alignment uses fm-alignment-session.sh.
+# Parent-routed marked requests continue to use fm-secondmate-report.sh with
+# corr=<id>.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -255,7 +257,7 @@ EOF
 }
 
 complete_direct_alignment() {
-  local id=${1:-} report content mate_id parent_home parent_status note session_project session_project_path
+  local id=${1:-} report content mate_id parent_home parent_status note session_project session_project_path session_record
   [ "$#" -ge 1 ] || usage
   alignment_home
   alignment_id_valid "$id" || fail "invalid alignment id: $id"
@@ -291,6 +293,14 @@ complete_direct_alignment() {
   parent_home=$FM_SECONDMATE_PARENT_HOME
   [ -d "$parent_home" ] && [ ! -L "$parent_home" ] \
     || fail "Secondmate parent home is missing or unsafe: $parent_home"
+  if [ -f "$FM_HOME/data/$id/session.meta" ] && [ ! -L "$FM_HOME/data/$id/session.meta" ]; then
+    session_record="$parent_home/state/$id.alignment"
+    [ -f "$session_record" ] && [ ! -L "$session_record" ] \
+      || fail "on-demand alignment requires a parent session record before completion"
+    [ "$(sed -n 's/^preflight_ack=//p' "$session_record" | tail -1)" = acknowledged ] \
+      && [ "$(sed -n 's/^readiness=//p' "$session_record" | tail -1)" = acknowledged ] \
+      || fail "on-demand alignment requires executor-authenticated semantic readiness before completion"
+  fi
   parent_status="$parent_home/state/$mate_id.status"
   [ ! -L "$parent_status" ] || fail "parent status path must not be a symlink: $parent_status"
   note=${*:2}

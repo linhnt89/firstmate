@@ -11,8 +11,8 @@ The AGENTS chain is bounded by the resolved repository root, and tracked prose p
 `context-owner:` and `owner-pointer:` declarations in the project AGENTS chain, plus optional project-local pointer files, identify explicit owners before fallback document candidates.
 Candidates are not treated as authoritative.
 Existing authoritative owners and this owner chain take precedence.
-Multiple non-conflicting owner scopes are preserved.
-Within one scope, the declared owner precedence is AGENTS, context-owner, then owner-pointer; incompatible same-precedence owners are surfaced as conflicts rather than selected silently.
+Multiple current owners are preserved across their declared project scopes.
+Declarations remain available unless an explicit `contract=<id> <path>` identity proves that different files claim incompatible authority over the same scope and contract, in which case all competing declarations are surfaced as conflicts.
 No pointer file is required.
 The strong executor lazily inspects relevant indexed owners before declaring readiness.
 Large required owners remain navigable at their project paths without silent omission or truncation, and audience labels do not determine authority.
@@ -20,19 +20,21 @@ The inventory contains no historical report bodies, and Firstmate does not seman
 The executor may use `bin/fm-alignment-session.sh retrieve <project> <session-id> --archive-home <parent-home>` for one explicitly relevant historical report, using the parent Firstmate home that owns the archive.
 When the parent uses a configured alternate data root, the command also passes `--archive-data <parent-data-root>`.
 The generic retrieval shape is `bin/fm-alignment-session.sh retrieve <project> <historical-session-id> --archive-home <parent-home> --archive-data <parent-data-root>` after inventory identifies a relevant prior session.
-A fresh launch records an observable launch acknowledgement after the worker endpoint and brief delivery have been confirmed.
-If project knowledge or the historical inventory changes before the report is retained or the home is closed, run `bin/fm-alignment-session.sh reconcile <session-id>` and complete the alignment against that refreshed snapshot.
+A fresh launch records an observable launch acknowledgement after the worker endpoint and instructions delivery have been confirmed, but semantic readiness remains pending.
+After inspecting relevant current owners, the executor authenticates a preflight acknowledgement before it can report substantive readiness or complete the outcome.
+If project knowledge or the historical inventory changes while the outcome is still mutable, run `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context, then require the executor's authenticated reconciliation acknowledgement before retention.
+A completed immutable outcome cannot be refreshed in place after a later delta; start a revised session and explicitly supersede the earlier report.
 
 The executor writes a validated report rather than a transcript.
 The report identifies the project, session, topic, source, and the existing alignment sections, followed by a separate durable-knowledge-candidates section.
 A direct local executor returns through the existing uncorrelated `bin/fm-alignment.sh complete-direct` pointer.
 A marked external or parent-routed request continues to use the existing correlated GitHub handoff and status protocol.
 
-Firstmate retains a completed report with `bin/fm-alignment-session.sh retain` in `data/alignments/<project>/<session>/` before `close` removes the ephemeral home.
+Firstmate retains a completed report with `bin/fm-alignment-session.sh retain` in `data/alignments/<project-key>/<session-id>/` before `close` removes the ephemeral home.
 Archive metadata binds the retained report content digest and the project, session, topic, and archive-key identities before cleanup can proceed.
 `inventory` enumerates only retained metadata for one project, so historical artifacts are deterministic and project-associated.
 A close without a retained completed report is refused unless Firstmate explicitly closes an abandoned session with `--abandon`.
-Abandonment retains non-empty incomplete evidence as an explicitly abandoned, discoverable, non-promotable archive before cleanup; a truly empty scratch session may close without an archive.
+Abandonment remains safe even when an incomplete session is stale, retaining non-empty incomplete evidence as an explicitly abandoned, discoverable, non-promotable archive before cleanup; a truly empty scratch session may close without an archive.
 
 ## Knowledge layers
 
@@ -54,7 +56,7 @@ Knowledge promotion therefore receives normal project review, validation, delive
 ## Supersession
 
 A later retained session may name an earlier session with `--supersedes`.
-Before retention, the parent requires the project and archive inventory to match the last reconciled snapshot.
+Before retention, the parent requires the project and archive inventory to match the last executor-acknowledged snapshot.
 The earlier report remains unchanged in the archive, while the later report and archive metadata identify the historical relationship.
 Updating current project knowledge is a separate authorized project task and never a direct write from the alignment session.
 

@@ -52,7 +52,8 @@ Firstmate owns routing, archive retention, and cleanup, but must not relay or re
 Ordinary implementation crewmates remain non-captain-facing.
 
 The session charter contains the current project knowledge first and a compact deterministic inventory of retained alignment metadata second.
-The owner index is repository-bounded, preserves non-conflicting scoped owners, and surfaces incompatible same-scope declarations instead of silently choosing among them.
+The owner index is repository-bounded and preserves multiple current owners across project scopes.
+Declarations remain available unless an explicit contract identity proves incompatible authority over the same scope and contract, in which case the competing declarations are surfaced as conflicts.
 It does not load every historical report, and Firstmate does not rank report bodies semantically.
 The executor may explicitly retrieve one relevant historical report with `bin/fm-alignment-session.sh retrieve <project> <historical-session-id> --archive-home <parent-home>`.
 The session can read the resolved project's repository and documentation, but its charter forbids project edits, commits, pushes, and direct knowledge promotion.
@@ -64,10 +65,13 @@ The final open-decision section must explicitly say `None - no material open dec
 
 The executor then uses the existing uncorrelated `complete-direct` pointer for a direct local session, or the existing correlated `fm-secondmate-report.sh --doc` route for a marked request.
 The parent runs `bin/fm-alignment-session.sh retain <session-id>` and must durably copy the validated report into its project archive before cleanup.
-Retention and cleanup require the project and archive inventory to match the last reconciled snapshot; the parent refreshes both with `bin/fm-alignment-session.sh reconcile <session-id>` when they change.
+Launch acknowledgement proves endpoint and instructions delivery only, while executor-authenticated preflight acknowledgement separately establishes semantic readiness.
+Retention requires that readiness acknowledgement and the project and archive inventory to match its accepted snapshot.
+For a mutable session, the parent uses `bin/fm-alignment-session.sh reconcile <session-id>` to publish a pending refreshed context, then the bound executor acknowledges that snapshot before retention.
+A completed immutable outcome cannot be refreshed in place after a later delta; start a revised session and explicitly supersede the earlier report.
 A non-empty incomplete abandonment is retained as explicitly abandoned historical evidence and cannot authorize implementation, while an empty scratch session may be closed without an archive.
 `inventory` reads archive metadata only, while `retrieve` is the explicit body-read operation.
-A successful fresh launch records an observable launch acknowledgement after endpoint and brief delivery confirmation.
+A successful fresh launch records an observable launch acknowledgement after endpoint and instructions delivery confirmation, but leaves semantic readiness pending until the executor completes and authenticates its current-owner preflight.
 
 A later report may pass `--supersedes <session-id>` to `retain`.
 The earlier report remains immutable historical evidence, while any current-knowledge or ADR change is only a candidate until Firstmate routes a normal authorized project task.

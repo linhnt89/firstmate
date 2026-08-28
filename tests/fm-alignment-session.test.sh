@@ -113,7 +113,24 @@ run_session() {
     PATH="$FAKEBIN:$PATH" "$SESSION" "$@"
 }
 
+ack_preflight() {
+  local home=$1 id=$2 token
+  token=$(grep '^executor_ack_token=' "$PARENT/state/$id.alignment" | cut -d= -f2-)
+  run_session "$home" acknowledge "$id" --kind preflight --executor-home "$home" --token "$token"
+}
+
+ack_reconciliation() {
+  local home=$1 id=$2 token
+  token=$(grep '^executor_ack_token=' "$PARENT/state/$id.alignment" | cut -d= -f2-)
+  run_session "$home" acknowledge "$id" --kind reconciliation --executor-home "$home" --token "$token"
+}
+
 write_report() {
+  local home=$1 id=$2 topic=$3 candidate=${4:-None identified.} project_path=${5:-$PROJECT} acknowledge=${6:-1}
+  if [ "$acknowledge" -eq 1 ] \
+    && [ "$(grep -c '^preflight_ack=acknowledged$' "$PARENT/state/$id.alignment" 2>/dev/null || true)" = 0 ]; then
+    ack_preflight "$home" "$id" >/dev/null
+  fi
   local home=$1 id=$2 topic=$3 candidate=${4:-None identified.} project_path=${5:-$PROJECT}
   cat > "$home/data/$id/report.md" <<EOF
 # Pre-implementation alignment
@@ -181,7 +198,7 @@ assert_session_identity() {
 }
 
 test_fresh_isolated_sessions_and_parent_archive() {
-  local h1 h2 out
+  local h1 h2 out token
   printf '# Oversized unrelated owner\n\n' > "$PROJECT/docs/oversized.md"
   awk 'BEGIN { for (i = 0; i < 10000; i++) print "unrelated owner payload" }' >> "$PROJECT/docs/oversized.md"
   git -C "$PROJECT" add docs/oversized.md
@@ -199,6 +216,22 @@ test_fresh_isolated_sessions_and_parent_archive() {
     "alignment did not use the configured effort"
   assert_grep 'launch_ack=acknowledged' "$PARENT/state/one.alignment" \
     "alignment did not record an observable launch acknowledgement"
+  assert_grep 'readiness=pending' "$PARENT/state/one.alignment" \
+    "launch delivery was incorrectly treated as semantic readiness"
+  assert_not_contains "$(cat "$PARENT/state/one.alignment")" 'preflight_ack=acknowledged' \
+    "fresh launch claimed semantic readiness before executor preflight"
+  write_report "$h1" one 'first topic' 'None identified.' "$PROJECT" 0
+  token=$(grep '^executor_ack_token=' "$PARENT/state/one.alignment" | cut -d= -f2-)
+  if out=$(run_session "$h1" acknowledge one --kind preflight --executor-home "$PARENT" --token "$token" 2>&1); then
+    fail "semantic readiness accepted acknowledgement from an unbound executor home"
+  fi
+  assert_contains "$out" 'not from its bound executor home' \
+    "semantic readiness did not authenticate the executor home"
+  if out=$(run_session "$h1" retain one 2>&1); then
+    fail "retention accepted a report before executor semantic readiness acknowledgement"
+  fi
+  assert_contains "$out" 'executor-authenticated semantic readiness acknowledgement' \
+    "retention did not enforce executor semantic readiness acknowledgement"
   h2=$(make_ephemeral_home session-two)
   out=$(run_session "$h2" start two "$PROJECT" 'second topic' --harness claude)
   assert_contains "$out" 'started alignment session two project=project topic=second topic' \
@@ -284,12 +317,75 @@ SH
   pass "failed alignment launches mark runtime abandonment before teardown rollback"
 }
 
+test_hashed_project_key_survives_failed_basename_start() {
+  local project_a project_b home_a home_b home_b2 fake_root key_b key_b2 out status
+  project_a="$TMP_ROOT/interleaving/a/project"
+  project_b="$TMP_ROOT/interleaving/b/project"
+  mkdir -p "$project_a" "$project_b"
+  printf '# Interleaving project A\n' > "$project_a/README.md"
+  printf '# Interleaving project B\n' > "$project_b/README.md"
+  git -C "$project_a" init -q
+  git -C "$project_a" add README.md
+  git -C "$project_a" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
+  git -C "$project_b" init -q
+  git -C "$project_b" add README.md
+  git -C "$project_b" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
+  home_a=$(make_ephemeral_home interleaving-a)
+  home_b=$(make_ephemeral_home interleaving-b)
+  fake_root="$TMP_ROOT/interleaving-fake-root"
+  mkdir -p "$fake_root/bin"
+  cat > "$fake_root/bin/fm-spawn.sh" <<EOF
+#!/usr/bin/env bash
+set -u
+if [ "\${1:-}" = interleaved-a ]; then
+  FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \\
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \\
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \\
+    FM_FAKE_TREEHOUSE_HOME="$home_b" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \\
+    FM_SKIP_SECONDMATE_INHERIT=1 FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \\
+    PATH="$FAKEBIN:\$PATH" "$ROOT_REAL/bin/fm-alignment-session.sh" \\
+    start interleaved-b "$project_b" 'hashed survivor' --harness claude >/dev/null
+fi
+exit 1
+EOF
+  chmod +x "$fake_root/bin/fm-spawn.sh"
+  out=$(FM_ROOT_OVERRIDE="$fake_root" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    FM_FAKE_TREEHOUSE_HOME="$home_a" FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" \
+    FM_SKIP_SECONDMATE_INHERIT=1 FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
+    PATH="$FAKEBIN:$PATH" "$SESSION" start interleaved-a "$project_a" \
+    'failed basename owner' --harness claude 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "basename-owner start unexpectedly succeeded"
+  key_b=$(grep '^project_key=' "$PARENT/state/interleaved-b.alignment" | cut -d= -f2-)
+  assert_contains "$key_b" 'project-' \
+    "colliding project did not receive a hashed key during the failed-start interleaving"
+  assert_grep "$project_b" "$PARENT/data/alignments/$key_b/.project-path" \
+    "colliding project did not retain its hashed key reservation"
+  assert_absent "$PARENT/state/interleaved-a.alignment" \
+    "failed basename-owner start left its parent session record"
+  assert_absent "$home_a" "failed basename-owner start left its ephemeral home"
+  home_b2=$(make_ephemeral_home interleaving-b2)
+  run_session "$home_b2" start interleaved-b2 "$project_b" 'hashed survivor again' --harness claude >/dev/null
+  key_b2=$(grep '^project_key=' "$PARENT/state/interleaved-b2.alignment" | cut -d= -f2-)
+  [ "$key_b2" = "$key_b" ] || fail "rediscovery forgot the already-reserved hashed project key"
+  pass "hashed project archive keys survive failed basename-owner starts"
+}
+
 test_archive_selective_retrieval_supersession_and_promotion() {
   local h1 h2 out brief
   h1="$TMP_ROOT/session-one"
   h2="$TMP_ROOT/session-two"
   write_report "$h1" one 'first topic' 'Domain term candidate.'
   run_session "$h1" retain one >/dev/null
+  printf 'changed after completed alignment\n' > "$PROJECT/completed-delta.txt"
+  if out=$(run_session "$h1" reconcile one 2>&1); then
+    fail "parent-only reconciliation refreshed a completed immutable alignment"
+  fi
+  assert_contains "$out" 'completed alignment one is immutable' \
+    "completed alignment did not require a revised outcome after a later delta"
+  rm -f "$PROJECT/completed-delta.txt"
   # A substituted archive identity must not authorize direct ephemeral cleanup.
   sed -i "s#^project_path=.*#project_path=$TMP_ROOT/foreign-project#" \
     "$PARENT/data/alignments/project/one/metadata"
@@ -403,6 +499,11 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   run_session "$h2" retain two-promotion --supersedes one --outcome both >/dev/null
   # Simulate a crash after archive publication but before the parent record update.
   sed -i '/^outcome=/d; s/^status=.*/status=running/' "$PARENT/state/two-promotion.alignment"
+  if out=$(run_session "$h2" reconcile two-promotion 2>&1); then
+    fail "reconciliation reopened an already archived immutable outcome"
+  fi
+  assert_contains "$out" 'completed alignment two-promotion is immutable' \
+    "archived immutable outcome did not require a revised session during recovery"
   run_session "$h2" retain two-promotion >/dev/null
   assert_grep 'outcome=both' "$PARENT/state/two-promotion.alignment" \
     "idempotent retain did not recover the archived downstream outcome"
@@ -450,8 +551,8 @@ test_archive_selective_retrieval_supersession_and_promotion() {
   if out=$(run_session "$h2" promote two-promotion --mode local-only --yolo off --purpose knowledge-only --task-id stale-followup 2>&1); then
     fail "promotion accepted a project changed after hydration"
   fi
-  assert_contains "$out" 'changed since alignment hydration' \
-    "stale project promotion did not require reconciliation"
+  assert_contains "$out" 'start a revised session and explicitly supersede the immutable outcome' \
+    "stale completed promotion did not require a revised outcome"
   rm -f "$PROJECT/stale-alignment-input.txt"
   sed -i 's/^outcome=.*/outcome=knowledge-only/; s/^status=.*/status=running/' \
     "$PARENT/state/two-promotion.alignment"
@@ -482,15 +583,25 @@ test_promotion_detects_content_changes_to_preexisting_dirty_knowledge() {
   printf '\npreexisting local knowledge change\n' >> "$PROJECT/README.md"
   home=$(make_ephemeral_home dirty-knowledge)
   run_session "$home" start dirty-knowledge "$PROJECT" 'dirty knowledge topic' --harness claude >/dev/null
+  ack_preflight "$home" dirty-knowledge >/dev/null
   printf '\npost-hydration edit to the same dirty owner\n' >> "$PROJECT/README.md"
   write_report "$home" dirty-knowledge 'dirty knowledge topic'
-  run_session "$home" retain dirty-knowledge >/dev/null
   out=$(run_session "$home" retain dirty-knowledge 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "retention accepted a changed preexisting dirty canonical owner"
   assert_contains "$out" 'changed since reconciliation' \
     "retention did not require freshness reconciliation before archiving"
   run_session "$home" reconcile dirty-knowledge >/dev/null
+  out=$(run_session "$home" retain dirty-knowledge 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "retention accepted a refreshed snapshot without executor acknowledgement"
+  assert_contains "$out" 'executor-authenticated semantic readiness acknowledgement' \
+    "retention did not require executor acknowledgement after reconciliation"
+  ack_reconciliation "$home" dirty-knowledge >/dev/null
+  assert_grep 'reconciliation_ack=acknowledged' "$PARENT/state/dirty-knowledge.alignment" \
+    "executor reconciliation acknowledgement was not durably recorded"
+  assert_not_contains "$(cat "$PARENT/state/dirty-knowledge.alignment")" 'reconciliation_pending=1' \
+    "executor reconciliation acknowledgement left the pending marker active"
   run_session "$home" retain dirty-knowledge >/dev/null
   run_session "$home" promote dirty-knowledge --mode local-only --yolo off --purpose implementation >/dev/null
   cp "$original" "$PROJECT/README.md"
@@ -640,8 +751,8 @@ test_nested_project_context_is_bounded_and_tracks_repo_relative_prose() {
   git -C "$repo" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm 'nested project fixture'
   home=$(make_ephemeral_home nested-project)
   out=$(run_session "$home" start nested-owners "$project" 'nested owner topic' --harness claude)
-  assert_contains "$out" 'readiness=acknowledged' \
-    "nested project alignment did not report its launch acknowledgement"
+  assert_contains "$out" 'launch=acknowledged readiness=pending' \
+    "nested project alignment did not separate launch delivery from semantic readiness"
   assert_grep 'Intermediate instructions' "$home/data/alignment-context.md" \
     "nested project omitted an intermediate AGENTS instruction"
   assert_not_contains "$(cat "$home/data/alignment-context.md")" 'FIRSTMATE GLOBAL SECRET' \
@@ -658,30 +769,38 @@ test_nested_project_context_is_bounded_and_tracks_repo_relative_prose() {
   pass "nested alignment hydration is repository-bounded and preserves scoped owners"
 }
 
-test_owner_precedence_resolves_conflicts() {
-  local home
+test_scoped_owners_and_explicit_contract_conflicts() {
+  local home ambiguous
   printf '# Context owner\n' > "$PROJECT/docs/context-owner.md"
   printf '# Pointer owner\n' > "$PROJECT/docs/pointer-owner.md"
   printf 'docs/context-owner.md\n' > "$PROJECT/context-owner"
   printf 'docs/pointer-owner.md\n' > "$PROJECT/owner-pointer"
-  home=$(make_ephemeral_home owner-precedence)
-  run_session "$home" start owner-precedence "$PROJECT" 'owner precedence' --harness claude >/dev/null
+  home=$(make_ephemeral_home owner-scopes)
+  run_session "$home" start owner-scopes "$PROJECT" 'owner scopes' --harness claude >/dev/null
   assert_grep $'selected\tdocs/domain.md\t' "$home/data/alignment-context.md" \
-    "AGENTS owner did not outrank explicit owner declarations"
-  assert_grep $'conflict\tdocs/context-owner.md\t' "$home/data/alignment-context.md" \
-    "context-owner conflict was not surfaced"
-  assert_grep $'conflict\tdocs/pointer-owner.md\t' "$home/data/alignment-context.md" \
-    "owner-pointer conflict was not surfaced"
+    "AGENTS owner was not preserved as a current owner"
+  assert_grep $'selected\tdocs/context-owner.md\t' "$home/data/alignment-context.md" \
+    "legitimate context owner was incorrectly discarded by declaration precedence"
+  assert_grep $'selected\tdocs/pointer-owner.md\t' "$home/data/alignment-context.md" \
+    "legitimate pointer owner was incorrectly discarded by declaration precedence"
+
+  printf 'contract=shared docs/context-owner.md\n' > "$PROJECT/context-owner"
+  printf 'contract=shared docs/pointer-owner.md\n' > "$PROJECT/owner-pointer"
+  ambiguous=$(make_ephemeral_home owner-ambiguity)
+  run_session "$ambiguous" start owner-ambiguity "$PROJECT" 'owner ambiguity' --harness claude >/dev/null
+  assert_grep $'conflict\tdocs/context-owner.md\t' "$ambiguous/data/alignment-context.md" \
+    "explicit same-contract context ambiguity was not surfaced"
+  assert_grep $'conflict\tdocs/pointer-owner.md\t' "$ambiguous/data/alignment-context.md" \
+    "explicit same-contract pointer ambiguity was not surfaced"
   rm -f "$PROJECT/context-owner" "$PROJECT/owner-pointer" \
     "$PROJECT/docs/context-owner.md" "$PROJECT/docs/pointer-owner.md"
-  pass "alignment owner precedence selects authority and surfaces conflicts"
+  pass "alignment preserves scoped owners and only surfaces explicit same-contract conflicts"
 }
 
 test_teardown_requires_retention_and_abandon_is_explicit() {
   local h1 h3 h4 h5 out status
   h1="$TMP_ROOT/session-one"
   h3=$(make_ephemeral_home session-three)
-  run_session "$h1" reconcile one >/dev/null
   run_session "$h1" close one >/dev/null || fail "retained session could not be closed"
   assert_absent "$PARENT/state/one.meta" "closed session retained live runtime metadata"
   assert_present "$PARENT/data/alignments/project/one/report.md" \
@@ -689,6 +808,7 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
 
   h5=$(make_ephemeral_home incomplete-abandon)
   run_session "$h5" start incomplete "$PROJECT" 'incomplete topic' --harness claude >/dev/null
+  printf 'changed after incomplete alignment launch\n' > "$PROJECT/stale-incomplete-input.txt"
   printf '# Incomplete alignment evidence\n\nA useful unresolved observation.\n' > "$h5/data/incomplete/report.md"
   out=$(run_session "$h5" close incomplete --abandon 2>&1)
   assert_contains "$out" 'retained abandoned alignment evidence' \
@@ -704,6 +824,7 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
   out=$(run_session "$h5" retrieve "$PROJECT" incomplete)
   assert_contains "$out" 'A useful unresolved observation.' \
     "abandoned alignment evidence could not be explicitly retrieved"
+  rm -f "$PROJECT/stale-incomplete-input.txt"
   out=$(run_session "$h5" promote incomplete --mode local-only --yolo off --purpose implementation 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "abandoned alignment evidence authorized implementation"
@@ -767,6 +888,7 @@ make_parent_and_project
 test_fresh_isolated_sessions_and_parent_archive
 test_project_key_reservation_isolates_same_basename_projects
 test_failed_start_removes_owned_project_reservation
+test_hashed_project_key_survives_failed_basename_start
 test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
 test_promotion_detects_content_changes_to_preexisting_dirty_knowledge
@@ -776,5 +898,5 @@ test_teardown_rejects_symlinked_data_root
 test_spawn_requires_parent_alignment_record
 test_teardown_requires_retention_and_abandon_is_explicit
 test_nested_project_context_is_bounded_and_tracks_repo_relative_prose
-test_owner_precedence_resolves_conflicts
+test_scoped_owners_and_explicit_contract_conflicts
 echo '# all fm-alignment-session tests passed'
