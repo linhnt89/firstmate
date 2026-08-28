@@ -845,6 +845,7 @@ schema=fm-alignment-session.v1
 session_id=$session_id
 project_name=$SESSION_PROJECT_NAME
 project_path=$SESSION_PROJECT_PATH
+project_key=$SESSION_PROJECT_KEY
 topic=$topic
 EOF
   write_canonical_context "$SESSION_HOME/data/alignment-context.md" "$SESSION_PROJECT_PATH"

@@ -1579,8 +1579,34 @@ validate_firstmate_home_for_spawn() {
   printf '%s\n' "$abs_home"
 }
 
+alignment_project_name_for_path() {
+  local path=$1 name
+  name=$(basename -- "$path")
+  name=$(printf '%s' "$name" | sed 's/[^A-Za-z0-9._-]/-/g')
+  [ -n "$name" ] || name=project
+  printf '%s\n' "$name"
+}
+
+alignment_project_key_valid() {
+  local key=$1
+  case "$key" in
+    ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+
+alignment_project_path_hash() {
+  local path=$1
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$path" | sha256sum | cut -c1-12
+  else
+    printf '%s' "$path" | shasum -a 256 | cut -c1-12
+  fi
+}
+
 validate_alignment_session_binding() {
   local id=$1 home=$2 record parent_marker session_meta abs_home abs_parent record_home
+  local project_name project_path project_key topic resolved_project
   record="$STATE/$id.alignment"
   parent_marker="$home/.fm-secondmate-parent"
   session_meta="$home/data/$id/session.meta"
@@ -1602,13 +1628,39 @@ validate_alignment_session_binding() {
     echo "error: alignment session $id is not bound to this secondmate home" >&2
     return 1
   }
-  [ -n "$(fm_meta_get "$record" project_name)" ] \
-    && [ -n "$(fm_meta_get "$record" project_path)" ] \
-    && [ -n "$(fm_meta_get "$record" project_key)" ] \
-    && [ -n "$(fm_meta_get "$record" topic)" ] || {
-      echo "error: parent alignment session record for $id lacks project or topic identity" >&2
+  project_name=$(fm_meta_get "$record" project_name)
+  project_path=$(fm_meta_get "$record" project_path)
+  project_key=$(fm_meta_get "$record" project_key)
+  topic=$(fm_meta_get "$record" topic)
+  [ -n "$project_name" ] && [ -n "$project_path" ] && [ -n "$project_key" ] && [ -n "$topic" ] || {
+    echo "error: parent alignment session record for $id lacks project or topic identity" >&2
+    return 1
+  }
+  alignment_project_key_valid "$project_key" || {
+    echo "error: parent alignment session record for $id has an invalid project key" >&2
+    return 1
+  }
+  resolved_project=$(CDPATH='' cd -- "$project_path" 2>/dev/null && pwd -P) || {
+    echo "error: parent alignment session record for $id has an unresolved project path" >&2
+    return 1
+  }
+  [ "$resolved_project" = "$project_path" ] \
+    && [ "$(alignment_project_name_for_path "$project_path")" = "$project_name" ] \
+    || {
+      echo "error: parent alignment session record for $id has inconsistent project identity" >&2
       return 1
     }
+  case "$project_key" in
+    "$project_name"|"$project_name-$(alignment_project_path_hash "$project_path")") ;;
+    *)
+      echo "error: parent alignment session record for $id has an inconsistent project key" >&2
+      return 1
+      ;;
+  esac
+  git -C "$project_path" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    echo "error: parent alignment session record for $id has a non-git project path" >&2
+    return 1
+  }
   [ -f "$parent_marker" ] && [ ! -L "$parent_marker" ] \
     && [ "$(fm_meta_get "$parent_marker" schema)" = fm-secondmate-parent.v1 ] \
     && [ "$(fm_meta_get "$parent_marker" route)" = local ] \
@@ -1624,8 +1676,10 @@ validate_alignment_session_binding() {
   [ -f "$session_meta" ] && [ ! -L "$session_meta" ] \
     && [ "$(fm_meta_get "$session_meta" schema)" = fm-alignment-session.v1 ] \
     && [ "$(fm_meta_get "$session_meta" session_id)" = "$id" ] \
-    && [ "$(fm_meta_get "$session_meta" project_path)" = "$(fm_meta_get "$record" project_path)" ] \
-    && [ "$(fm_meta_get "$session_meta" topic)" = "$(fm_meta_get "$record" topic)" ] || {
+    && [ "$(fm_meta_get "$session_meta" project_name)" = "$project_name" ] \
+    && [ "$(fm_meta_get "$session_meta" project_path)" = "$project_path" ] \
+    && [ "$(fm_meta_get "$session_meta" project_key)" = "$project_key" ] \
+    && [ "$(fm_meta_get "$session_meta" topic)" = "$topic" ] || {
       echo "error: alignment session $id has incomplete session identity metadata" >&2
       return 1
     }

@@ -250,6 +250,77 @@ EOF
   [ "$status" -ne 0 ] || fail "malformed alignment spawn returned success"
   assert_contains "$out" 'is malformed or not launchable' \
     "malformed parent alignment record was not refused"
+
+  home=$(make_ephemeral_home inconsistent-alignment)
+  printf '%s\n' inconsistent-alignment > "$home/.fm-secondmate-home"
+  cat > "$home/.fm-secondmate-parent" <<EOF
+schema=fm-secondmate-parent.v1
+route=local
+parent_home=$PARENT
+EOF
+  cat > "$PARENT/state/inconsistent-alignment.alignment" <<EOF
+schema=fm-alignment-session.v1
+session_id=inconsistent-alignment
+project_name=not-project
+project_path=$PROJECT
+project_key=../outside
+topic=identity topic
+home=$home
+status=starting
+source=local
+EOF
+  mkdir -p "$home/data/inconsistent-alignment"
+  cat > "$home/data/inconsistent-alignment/session.meta" <<EOF
+schema=fm-alignment-session.v1
+session_id=inconsistent-alignment
+project_name=not-project
+project_path=$PROJECT
+project_key=../outside
+topic=identity topic
+EOF
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
+    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" inconsistent-alignment "$home" \
+    --secondmate --alignment-session --harness claude 2>&1); then
+    fail "identity-inconsistent alignment spawn was accepted"
+  else
+    status=$?
+  fi
+  [ "$status" -ne 0 ] || fail "identity-inconsistent alignment spawn returned success"
+  assert_contains "$out" 'invalid project key' \
+    "invalid parent project key was not refused"
+  sed -i 's#^project_key=../outside#project_key=project#' \
+    "$PARENT/state/inconsistent-alignment.alignment" "$home/data/inconsistent-alignment/session.meta"
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
+    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" inconsistent-alignment "$home" \
+    --secondmate --alignment-session --harness claude 2>&1); then
+    fail "project-name-inconsistent alignment spawn was accepted"
+  else
+    status=$?
+  fi
+  [ "$status" -ne 0 ] || fail "project-name-inconsistent alignment spawn returned success"
+  assert_contains "$out" 'inconsistent project identity' \
+    "project-name mismatch was not refused"
+  sed -i 's/^project_name=not-project/project_name=project/; s/^project_key=project/project_key=fabricated/' \
+    "$PARENT/state/inconsistent-alignment.alignment" "$home/data/inconsistent-alignment/session.meta"
+  if out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_PROJECTS_OVERRIDE="$PARENT/projects" FM_CONFIG_OVERRIDE="$PARENT/config" \
+    FM_FAKE_TMUX_LOG="$TMP_ROOT/runtime/tmux.log" FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux \
+    PATH="$FAKEBIN:$PATH" "$ROOT_REAL/bin/fm-spawn.sh" inconsistent-alignment "$home" \
+    --secondmate --alignment-session --harness claude 2>&1); then
+    fail "project-key-inconsistent alignment spawn was accepted"
+  else
+    status=$?
+  fi
+  [ "$status" -ne 0 ] || fail "project-key-inconsistent alignment spawn returned success"
+  assert_contains "$out" 'inconsistent project key' \
+    "fabricated project key was not refused"
   pass "alignment spawns require valid parent-owned session records"
 }
 
