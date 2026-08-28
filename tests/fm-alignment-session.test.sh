@@ -471,6 +471,26 @@ test_promotion_detects_content_changes_to_preexisting_dirty_knowledge() {
   pass "promotion detects content changes to preexisting dirty canonical knowledge"
 }
 
+test_historical_report_changes_invalidate_hydration() {
+  local historical observer out status
+  historical=$(make_ephemeral_home historical-report)
+  run_session "$historical" start historical "$PROJECT" 'historical topic' --harness claude >/dev/null
+  write_report "$historical" historical 'historical topic'
+  run_session "$historical" retain historical >/dev/null
+
+  observer=$(make_ephemeral_home archive-observer)
+  run_session "$observer" start observer "$PROJECT" 'observer topic' --harness claude >/dev/null
+  write_report "$observer" observer 'observer topic'
+  run_session "$observer" retain observer >/dev/null
+  printf '\npost-hydration historical mutation\n' >> "$PARENT/data/alignments/project/historical/report.md"
+  out=$(run_session "$observer" promote observer --mode local-only --yolo off --purpose implementation 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "promotion accepted a changed historical report"
+  assert_contains "$out" 'changed since alignment hydration' \
+    "historical report changes did not invalidate the hydration snapshot"
+  pass "historical report content changes invalidate alignment hydration"
+}
+
 test_archive_staging_recovers_atomically() {
   local home="$TMP_ROOT/session-staging"
   home=$(make_ephemeral_home session-staging)
@@ -641,6 +661,7 @@ test_failed_start_removes_owned_project_reservation
 test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
 test_promotion_detects_content_changes_to_preexisting_dirty_knowledge
+test_historical_report_changes_invalidate_hydration
 test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_rejects_symlinked_data_root

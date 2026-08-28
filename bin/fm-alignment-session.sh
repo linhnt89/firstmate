@@ -1055,7 +1055,7 @@ EOF
 }
 
 inventory_session() {
-  local project_input=$1 project path key root meta sid status topic supersedes
+  local project_input=$1 project path key root meta sid status topic supersedes report_digest
   local meta_count=0
   require_parent_home
   project=$(project_path_resolve "$project_input")
@@ -1076,8 +1076,9 @@ inventory_session() {
     status=$(read_record_field "$meta" status || true)
     topic=$(read_record_field "$meta" topic || true)
     supersedes=$(read_record_field "$meta" supersedes || true)
-    printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport=%s\tretrieve=bin/fm-alignment-session.sh retrieve %q %q --archive-home %q --archive-data %q\n' \
-      "$sid" "$topic" "$status" "$supersedes" "$(archive_report_pointer "$key" "$sid")" "$project" "$sid" "$FM_HOME" "$DATA"
+    report_digest=$(file_content_digest "$root/$sid/report.md") || continue
+    printf 'session=%s\ttopic=%s\tstatus=%s\tsource=local\tsupersedes=%s\treport_digest=%s\treport=%s\tretrieve=bin/fm-alignment-session.sh retrieve %q %q --archive-home %q --archive-data %q\n' \
+      "$sid" "$topic" "$status" "$supersedes" "$report_digest" "$(archive_report_pointer "$key" "$sid")" "$project" "$sid" "$FM_HOME" "$DATA"
     meta_count=$((meta_count + 1))
   done < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name metadata \
     ! -path "$root/.*.tmp/metadata" -print | LC_ALL=C sort)
