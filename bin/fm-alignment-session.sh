@@ -175,6 +175,21 @@ project_key_for_path() {
   local path=$1 data_root=${2:-$DATA} name root meta existing_path reserved_path collision=0
   archive_path_safe "$data_root/alignments"
   name=$(project_name_for_path "$path")
+  for root in "$data_root/alignments"/*; do
+    [ -d "$root" ] && [ ! -L "$root" ] || continue
+    if [ -f "$root/.project-path" ] && [ ! -L "$root/.project-path" ] \
+      && [ "$(cat "$root/.project-path")" = "$path" ]; then
+      printf '%s\n' "$(basename "$root")"
+      return
+    fi
+    for meta in "$root"/*/metadata; do
+      [ -f "$meta" ] && [ ! -L "$meta" ] || continue
+      if [ "$(read_record_field "$meta" project_path || true)" = "$path" ]; then
+        printf '%s\n' "$(basename "$root")"
+        return
+      fi
+    done
+  done
   root="$data_root/alignments/$name"
   if [ -d "$root" ] && [ ! -L "$root" ]; then
     if [ -f "$root/.project-path" ] && [ ! -L "$root/.project-path" ]; then
@@ -746,18 +761,16 @@ start_session() {
   SESSION_PROJECT_PATH=$(project_path_resolve "$project_input")
   SESSION_PROJECT_NAME=$(project_name_for_path "$SESSION_PROJECT_PATH")
   SESSION_PROJECT_KEY=$(project_key_for_path "$SESSION_PROJECT_PATH")
-  if [ "$SESSION_PROJECT_KEY" = "$SESSION_PROJECT_NAME" ]; then
-    START_PROJECT_KEY_ROOT=$(archive_root_for "$SESSION_PROJECT_KEY")
-    safe_dir "$START_PROJECT_KEY_ROOT"
-    START_PROJECT_KEY_RESERVATION="$START_PROJECT_KEY_ROOT/.project-path"
-    if [ -e "$START_PROJECT_KEY_RESERVATION" ] || [ -L "$START_PROJECT_KEY_RESERVATION" ]; then
-      [ ! -L "$START_PROJECT_KEY_RESERVATION" ] || fail "project-key reservation is a symlink: $START_PROJECT_KEY_RESERVATION"
-      [ "$(cat "$START_PROJECT_KEY_RESERVATION")" = "$SESSION_PROJECT_PATH" ] \
-        || fail "project-key reservation belongs to another project"
-    else
-      printf '%s\n' "$SESSION_PROJECT_PATH" > "$START_PROJECT_KEY_RESERVATION"
-      START_PROJECT_KEY_RESERVATION_CREATED=1
-    fi
+  START_PROJECT_KEY_ROOT=$(archive_root_for "$SESSION_PROJECT_KEY")
+  safe_dir "$START_PROJECT_KEY_ROOT"
+  START_PROJECT_KEY_RESERVATION="$START_PROJECT_KEY_ROOT/.project-path"
+  if [ -e "$START_PROJECT_KEY_RESERVATION" ] || [ -L "$START_PROJECT_KEY_RESERVATION" ]; then
+    [ ! -L "$START_PROJECT_KEY_RESERVATION" ] || fail "project-key reservation is a symlink: $START_PROJECT_KEY_RESERVATION"
+    [ "$(cat "$START_PROJECT_KEY_RESERVATION")" = "$SESSION_PROJECT_PATH" ] \
+      || fail "project-key reservation belongs to another project"
+  else
+    printf '%s\n' "$SESSION_PROJECT_PATH" > "$START_PROJECT_KEY_RESERVATION"
+    START_PROJECT_KEY_RESERVATION_CREATED=1
   fi
   rm -f -- "$PROJECT_KEY_LOCK/pid"
   rmdir "$PROJECT_KEY_LOCK"
