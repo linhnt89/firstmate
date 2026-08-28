@@ -104,5 +104,6 @@ Settled decisions and acceptance criteria in a complete brief are authoritative 
 If implementation discovers a new material contradiction or decision that the aligned contract does not settle, the worker must stop and escalate it with the existing keyed `needs-decision` and captain-hold lifecycle rather than silently choosing a direction.
 A mechanical implementation detail that does not change the aligned outcome remains the worker's engineering discretion.
 
-Do not add a parallel alignment database, provider configuration, state store, or worker kind.
+Do not add a parallel alignment database, state store, or worker kind.
+The optional alignment harness/model/effort pin belongs only in local configuration, as the configuration reference documents.
 Use the existing brief, parent-owned alignment archive, GitHub handoff issue, backlog, status/document-pointer, and captain-hold primitives.

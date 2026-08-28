@@ -260,7 +260,7 @@ The `data/secondmates.md` line contract is owned by the [`secondmate-provisionin
 Firstmate classifies the request before implementation intake and keeps clear mechanical work on the ordinary direct-delegation path.
 New ship and scout briefs start `Alignment contract: unclassified`; a ship cannot spawn until firstmate records `bypassed` or a completed alignment outcome, while a scout may investigate unclassified and its promotion requires that same explicit classification.
 A material unresolved product, behavioral, contract, data-semantic, or architectural choice sets `Alignment contract: required` in the ship brief and routes a focused pre-implementation alignment through a fresh local alignment session or the existing external-specialist issue protocol.
-The alignment lifecycle is not post-implementation review and does not add a worker kind, provider configuration, or parallel database.
+The alignment lifecycle is not post-implementation review and does not add a worker kind or parallel database; its optional harness/model/effort pin remains local configuration as documented in [configuration.md](configuration.md#local-alignment-executor-configalignment-harness).
 A local alignment conversation is disposable, while `bin/fm-alignment-session.sh` retains its validated report in the parent-owned project archive before cleanup; the existing `bin/fm-alignment.sh` direct pointer remains the return channel, and a parent-routed request preserves its correlation.
 An external conversation remains on its coherent GitHub source issue.
 The report or issue outcome is consumed into the implementation brief as explicit goal, facts, settled decisions, acceptance criteria, scope, engineering discretion, and remaining open decisions.
