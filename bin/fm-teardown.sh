@@ -732,6 +732,16 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
     echo "REFUSED: ephemeral alignment $ID has an invalid project archive key" >&2
     exit 1
   }
+  ALIGNMENT_PROJECT_PATH_REAL=$(CDPATH='' cd -- "$ALIGNMENT_PROJECT_PATH" 2>/dev/null && pwd -P || true)
+  PROJ_REAL=$(CDPATH='' cd -- "$PROJ" 2>/dev/null && pwd -P || true)
+  ALIGNMENT_PROJECT_NAME_REAL=$(basename -- "$ALIGNMENT_PROJECT_PATH_REAL" 2>/dev/null || true)
+  ALIGNMENT_PROJECT_NAME_REAL=$(printf '%s' "$ALIGNMENT_PROJECT_NAME_REAL" | sed 's/[^A-Za-z0-9._-]/-/g')
+  [ -n "$ALIGNMENT_PROJECT_PATH_REAL" ] && [ -n "$PROJ_REAL" ] \
+    && [ "$ALIGNMENT_PROJECT_PATH_REAL" = "$PROJ_REAL" ] \
+    && [ "$ALIGNMENT_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME_REAL" ] || {
+      echo "REFUSED: ephemeral alignment $ID project identity does not match the immutable task project; no valid parent-owned archive" >&2
+      exit 1
+    }
   alignment_archive_path_safe "$DATA/alignments/$ALIGNMENT_PROJECT_KEY" || {
     echo "REFUSED: ephemeral alignment $ID archive is outside the parent data boundary" >&2
     exit 1

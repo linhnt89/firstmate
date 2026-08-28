@@ -882,6 +882,7 @@ EOF
     fail "alignment session $session_id could not be launched"
   fi
   START_HOME_LEASED=0
+  record_set "$STATE/$session_id.meta" project "$SESSION_PROJECT_PATH"
   record_set "$SESSION_RECORD" status running
   printf 'started alignment session %s project=%s topic=%s\n' \
     "$session_id" "$SESSION_PROJECT_NAME" "$SESSION_TOPIC"

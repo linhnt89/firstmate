@@ -684,7 +684,7 @@ EOF
 }
 
 test_teardown_rejects_tampered_alignment_identity() {
-  local traversal identity out status
+  local traversal identity alignment_key archive_dir original_path original_reservation out status
   traversal=$(make_ephemeral_home tampered-alignment-key)
   run_session "$traversal" start tampered-key "$PROJECT" 'tampered key topic' --harness claude >/dev/null
   sed -i 's#^project_key=.*#project_key=../outside#' "$PARENT/state/tampered-key.alignment"
@@ -703,8 +703,14 @@ test_teardown_rejects_tampered_alignment_identity() {
   run_session "$identity" start tampered-identity "$PROJECT" 'tampered identity topic' --harness claude >/dev/null
   write_report "$identity" tampered-identity 'tampered identity topic'
   run_session "$identity" retain tampered-identity >/dev/null
+  alignment_key=$(grep '^project_key=' "$PARENT/state/tampered-identity.alignment" | cut -d= -f2-)
+  archive_dir="$PARENT/data/alignments/$alignment_key/tampered-identity"
+  original_path=$(grep '^project_path=' "$archive_dir/metadata" | cut -d= -f2-)
+  original_reservation=$(cat "$PARENT/data/alignments/$alignment_key/.project-path")
   sed -i "s#^project_path=.*#project_path=$TMP_ROOT/not-the-task-project#" \
-    "$PARENT/state/tampered-identity.alignment"
+    "$PARENT/state/tampered-identity.alignment" "$archive_dir/metadata"
+  printf '%s\n' "$TMP_ROOT/not-the-task-project" > \
+    "$PARENT/data/alignments/$alignment_key/.project-path"
   out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
     FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
     FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$identity" \
@@ -715,6 +721,10 @@ test_teardown_rejects_tampered_alignment_identity() {
   assert_contains "$out" 'valid parent-owned archive' \
     "mismatched project identity did not preserve teardown safety"
   assert_present "$identity" "mismatched project identity allowed ephemeral deletion"
+  sed -i "s#^project_path=.*#project_path=$original_path#" \
+    "$PARENT/state/tampered-identity.alignment" "$archive_dir/metadata"
+  printf '%s\n' "$original_reservation" > \
+    "$PARENT/data/alignments/$alignment_key/.project-path"
   pass "teardown rejects traversal keys and mismatched alignment identities"
 }
 
