@@ -591,7 +591,7 @@ test_teardown_rejects_symlinked_data_root() {
     "$ROOT_REAL/bin/fm-teardown.sh" one 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "direct cleanup followed a symlinked data root"
-  assert_contains "$out" 'valid parent-owned archive' \
+  assert_contains "$out" 'archive is outside the parent data boundary' \
     "symlinked data root did not preserve teardown safety"
   rm "$data"
   mv "$escape/data" "$data"
@@ -683,6 +683,41 @@ EOF
   pass "forced teardown rejects symlinked abandoned archive ancestors"
 }
 
+test_teardown_rejects_tampered_alignment_identity() {
+  local traversal identity out status
+  traversal=$(make_ephemeral_home tampered-alignment-key)
+  run_session "$traversal" start tampered-key "$PROJECT" 'tampered key topic' --harness claude >/dev/null
+  sed -i 's#^project_key=.*#project_key=../outside#' "$PARENT/state/tampered-key.alignment"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$traversal" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" tampered-key --force 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "forced teardown accepted a traversal project key"
+  assert_contains "$out" 'invalid project archive key' \
+    "traversal project key was not rejected before archive lookup"
+  assert_present "$traversal" "traversal project key allowed ephemeral deletion"
+
+  identity=$(make_ephemeral_home tampered-alignment-identity)
+  run_session "$identity" start tampered-identity "$PROJECT" 'tampered identity topic' --harness claude >/dev/null
+  write_report "$identity" tampered-identity 'tampered identity topic'
+  run_session "$identity" retain tampered-identity >/dev/null
+  sed -i "s#^project_path=.*#project_path=$TMP_ROOT/not-the-task-project#" \
+    "$PARENT/state/tampered-identity.alignment"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$identity" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" tampered-identity --force 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "forced teardown accepted a mismatched project identity"
+  assert_contains "$out" 'valid parent-owned archive' \
+    "mismatched project identity did not preserve teardown safety"
+  assert_present "$identity" "mismatched project identity allowed ephemeral deletion"
+  pass "teardown rejects traversal keys and mismatched alignment identities"
+}
+
 test_teardown_requires_retention_and_abandon_is_explicit() {
   local h1 h3 h4 out status
   h1="$TMP_ROOT/session-one"
@@ -737,7 +772,7 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
     "$ROOT_REAL/bin/fm-teardown.sh" four --force 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "direct abandonment cleanup proceeded without a parent session record"
-  assert_contains "$out" 'valid parent session record' \
+  assert_contains "$out" 'invalid project archive key' \
     "missing parent session record did not preserve abandonment safety"
   assert_present "$h4" "missing parent session record allowed leased-home deletion"
 
@@ -762,6 +797,7 @@ test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_rejects_symlinked_data_root
 test_teardown_rejects_symlinked_abandoned_archive_ancestors
+test_teardown_rejects_tampered_alignment_identity
 test_teardown_requires_retention_and_abandon_is_explicit
 test_agents_discovery_stays_inside_resolved_project
 test_owner_precedence_resolves_conflicts
