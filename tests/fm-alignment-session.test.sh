@@ -573,6 +573,27 @@ test_teardown_rejects_symlinked_data_root() {
   pass "direct teardown rejects a symlinked data root"
 }
 
+test_agents_discovery_stays_inside_resolved_project() {
+  local outer="$TMP_ROOT/agents-boundary" bounded_project home context
+  mkdir -p "$outer/project"
+  printf '# Host instructions\nDo not import this file.\n' > "$outer/AGENTS.md"
+  printf '# Bounded project\n' > "$outer/project/README.md"
+  printf '# Project instructions\n' > "$outer/project/AGENTS.md"
+  git -C "$outer/project" init -q
+  git -C "$outer/project" add README.md AGENTS.md
+  git -C "$outer/project" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
+  bounded_project="$outer/project"
+  home=$(make_ephemeral_home agents-boundary-home)
+  run_session "$home" start agents-boundary "$bounded_project" 'boundary topic' --harness claude >/dev/null
+  context=$(cat "$home/data/alignment-context.md")
+  assert_contains "$context" 'Project instructions' \
+    "resolved project's AGENTS.md was not included"
+  assert_not_contains "$context" 'Do not import this file.' \
+    "AGENTS discovery imported instructions from outside the resolved project"
+  run_session "$home" close agents-boundary --abandon >/dev/null
+  pass "AGENTS discovery remains bounded to the resolved project"
+}
+
 test_owner_precedence_resolves_conflicts() {
   local home
   printf '# Context owner\n' > "$PROJECT/docs/context-owner.md"
@@ -666,5 +687,6 @@ test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_rejects_symlinked_data_root
 test_teardown_requires_retention_and_abandon_is_explicit
+test_agents_discovery_stays_inside_resolved_project
 test_owner_precedence_resolves_conflicts
 echo '# all fm-alignment-session tests passed'

@@ -422,15 +422,11 @@ canonical_document_paths() {
 }
 
 canonical_owner_declaration_sources() {
-  local project=$1 current=$1 file
-  while :; do
-    file="$current/AGENTS.md"
-    if [ -f "$file" ] && [ ! -L "$file" ]; then
-      printf '%s\n' "$file"
-    fi
-    [ "$current" = "$project" ] && break
-    current=$(dirname "$current")
-  done
+  local project=$1 file
+  file="$project/AGENTS.md"
+  if [ -f "$file" ] && [ ! -L "$file" ]; then
+    printf '%s\n' "$file"
+  fi
   find "$project" -maxdepth 2 -type f \( \
     -name '.context-owner' -o -name 'context-owner' -o \
     -name '.owner-pointer' -o -name 'owner-pointer' \
@@ -438,14 +434,15 @@ canonical_owner_declaration_sources() {
 }
 
 canonical_owner_declarations_from_source() {
-  local project=$1 source=$2 base declarations declaration candidate
+  local project=$1 source=$2 base declarations declaration candidate root
+  root=$project
   case "$(basename "$source")" in
     .context-owner|context-owner|.owner-pointer|owner-pointer)
       base=$(dirname "$source")
       declarations=$(awk '/^[[:space:]]*#/ { next } NF { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }' "$source")
       ;;
     *)
-      base=$project
+      base=$(dirname "$source")
       declarations=$(awk '
         /^[[:space:]]*(context-owner|context_owner|owner-pointer|owner_pointer)[[:space:]]*[:=]/ {
           line=$0
@@ -467,7 +464,7 @@ canonical_owner_declarations_from_source() {
     candidate="$base/$declaration"
     [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
     candidate=$(CDPATH='' cd -- "$(dirname "$candidate")" 2>/dev/null && pwd -P)/$(basename "$candidate") || continue
-    path_is_ancestor "$project" "$candidate" || [ "$candidate" = "$project" ] || continue
+    path_is_ancestor "$root" "$candidate" || [ "$candidate" = "$root" ] || continue
     canonical_document_is_text "$candidate" || continue
     printf '%s\n' "$candidate"
   done <<< "$declarations"
@@ -508,22 +505,12 @@ canonical_document_title() {
 }
 
 write_agents_chain() {
-  local project=$1 current=$1 file
-  local -a chain=()
-  while :; do
-    file="$current/AGENTS.md"
-    if [ -f "$file" ] && [ ! -L "$file" ]; then
-      chain+=("$file")
-    fi
-    [ "$current" = "$project" ] && break
-    current=$(dirname "$current")
-  done
-  for ((current=${#chain[@]}-1; current>=0; current--)); do
-    file=${chain[current]}
-    printf '\n### AGENTS chain: %s\n\n' "${file#"$project"/}"
+  local file="$1/AGENTS.md"
+  if [ -f "$file" ] && [ ! -L "$file" ]; then
+    printf '\n### AGENTS chain: AGENTS.md\n\n'
     cat "$file"
     printf '\n'
-  done
+  fi
 }
 
 write_canonical_context() {
