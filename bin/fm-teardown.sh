@@ -752,6 +752,14 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
   ALIGNMENT_METADATA_STATUS=$(grep '^status=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_REPORT=$(grep '^report=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_DIGEST=$(grep '^report_digest=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  alignment_archive_tree_valid() {
+    [ -d "$DATA" ] && [ ! -L "$DATA" ] || return 1
+    [ -d "$DATA/alignments" ] && [ ! -L "$DATA/alignments" ] || return 1
+    [ -d "$DATA/alignments/$ALIGNMENT_PROJECT_KEY" ] \
+      && [ ! -L "$DATA/alignments/$ALIGNMENT_PROJECT_KEY" ] || return 1
+    [ -d "${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}" ] \
+      && [ ! -L "${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}" ] || return 1
+  }
   alignment_complete_report_valid() {
     local digest
     [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] || return 1
@@ -769,6 +777,7 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
   alignment_abandoned_report_valid() {
     local digest
     [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] || return 1
+    alignment_archive_tree_valid || return 1
     [ -f "$ALIGNMENT_ARCHIVE" ] && [ ! -L "$ALIGNMENT_ARCHIVE" ] || return 1
     [ -f "$ALIGNMENT_METADATA" ] && [ ! -L "$ALIGNMENT_METADATA" ] || return 1
     if ! {
@@ -814,10 +823,7 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
       && [ ! -L "$ALIGNMENT_PROJECT_KEY_RESERVATION" ] \
       && [ "$(cat "$ALIGNMENT_PROJECT_KEY_RESERVATION" 2>/dev/null || true)" = "$ALIGNMENT_PROJECT_PATH" ] \
       && [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] \
-      && [ ! -L "$DATA" ] \
-      && [ ! -L "$DATA/alignments" ] \
-      && [ ! -L "$DATA/alignments/$ALIGNMENT_PROJECT_KEY" ] \
-      && [ ! -L "${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}" ] \
+      && alignment_archive_tree_valid \
       && [ -f "$ALIGNMENT_ARCHIVE" ] && [ ! -L "$ALIGNMENT_ARCHIVE" ] \
       && [ -f "$ALIGNMENT_METADATA" ] && [ ! -L "$ALIGNMENT_METADATA" ] \
       && [ "$ALIGNMENT_METADATA_SESSION" = "$ID" ] \

@@ -644,6 +644,45 @@ test_owner_precedence_resolves_conflicts() {
   pass "alignment owner precedence selects authority and surfaces conflicts"
 }
 
+test_teardown_rejects_symlinked_abandoned_archive_ancestors() {
+  local home archive_dir escape digest out status
+  home=$(make_ephemeral_home symlinked-abandoned-archive)
+  run_session "$home" start symlinked-abandoned "$PROJECT" 'symlinked archive topic' --harness claude >/dev/null
+  printf 'incomplete retained evidence\n' > "$home/data/symlinked-abandoned/report.md"
+  archive_dir="$PARENT/data/alignments/project/symlinked-abandoned"
+  mkdir -p "$archive_dir"
+  cp "$home/data/symlinked-abandoned/report.md" "$archive_dir/report.md"
+  digest=$(sha256sum "$archive_dir/report.md" | awk '{print $1}')
+  cat > "$archive_dir/metadata" <<EOF
+schema=fm-alignment-archive.v1
+project_name=project
+project_path=$PROJECT
+project_key=project
+session_id=symlinked-abandoned
+topic=symlinked archive topic
+source=local
+status=abandoned
+report=report.md
+report_digest=$digest
+EOF
+  printf 'archive=%s\n' "$archive_dir/report.md" >> "$PARENT/state/symlinked-abandoned.alignment"
+  printf 'alignment_abandon=1\n' >> "$PARENT/state/symlinked-abandoned.meta"
+  escape="$TMP_ROOT/symlinked-abandoned-escape"
+  mv "$archive_dir" "$escape"
+  ln -s "$escape" "$archive_dir"
+  out=$(FM_ROOT_OVERRIDE="$ROOT_REAL" FM_HOME="$PARENT" \
+    FM_DATA_OVERRIDE="$PARENT/data" FM_STATE_OVERRIDE="$PARENT/state" \
+    FM_CONFIG_OVERRIDE="$PARENT/config" FM_FAKE_TREEHOUSE_HOME="$home" \
+    FM_SPAWN_NO_GUARD=1 FM_BACKEND=tmux PATH="$FAKEBIN:$PATH" \
+    "$ROOT_REAL/bin/fm-teardown.sh" symlinked-abandoned --force 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "forced cleanup followed a symlinked abandoned archive ancestor"
+  assert_contains "$out" 'material evidence without a valid retained abandoned archive' \
+    "symlinked abandoned archive ancestor did not preserve teardown safety"
+  assert_present "$home" "symlinked abandoned archive ancestor allowed leased-home deletion"
+  pass "forced teardown rejects symlinked abandoned archive ancestors"
+}
+
 test_teardown_requires_retention_and_abandon_is_explicit() {
   local h1 h3 h4 out status
   h1="$TMP_ROOT/session-one"
@@ -722,6 +761,7 @@ test_close_requires_reconciled_archive_snapshot
 test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_rejects_symlinked_data_root
+test_teardown_rejects_symlinked_abandoned_archive_ancestors
 test_teardown_requires_retention_and_abandon_is_explicit
 test_agents_discovery_stays_inside_resolved_project
 test_owner_precedence_resolves_conflicts
