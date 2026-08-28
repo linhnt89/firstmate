@@ -409,12 +409,28 @@ alignment_config() {
 }
 
 canonical_document_paths() {
-  local project=$1 file relative
+  local project=$1 root project_rel file relative
+  root=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null || return 0)
+  if [ "$project" = "$root" ]; then
+    project_rel=.
+  else
+    case "$project/" in
+      "$root"/*) project_rel=${project#"$root"/} ;;
+      *) return 0 ;;
+    esac
+  fi
   while IFS= read -r -d '' relative; do
     case "$relative" in
       *.md|*.mdx|*.rst|*.adoc|*.txt)
         case "$relative" in *.report.md) continue ;; esac
-        file="$project/$relative"
+        if [ "$project_rel" = . ]; then
+          file="$root/$relative"
+        else
+          case "$relative" in
+            "$project_rel"/*) file="$root/$relative" ;;
+            *) continue ;;
+          esac
+        fi
         [ -f "$file" ] && [ ! -L "$file" ] && printf '%s\n' "$file"
         ;;
     esac

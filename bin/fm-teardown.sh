@@ -727,6 +727,7 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
   ALIGNMENT_ARCHIVE=$(grep '^archive=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_PROJECT_NAME=$(grep '^project_name=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_PROJECT_PATH=$(grep '^project_path=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_TOPIC=$(grep '^topic=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_PROJECT_KEY=$(grep '^project_key=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   alignment_project_key_valid "$ALIGNMENT_PROJECT_KEY" || {
     echo "REFUSED: ephemeral alignment $ID has an invalid project archive key" >&2
@@ -753,6 +754,7 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
   ALIGNMENT_METADATA_PROJECT_NAME=$(grep '^project_name=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_PROJECT_PATH=$(grep '^project_path=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_PROJECT_KEY=$(grep '^project_key=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  ALIGNMENT_METADATA_TOPIC=$(grep '^topic=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_STATUS=$(grep '^status=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_REPORT=$(grep '^report=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_DIGEST=$(grep '^report_digest=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
@@ -775,6 +777,9 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
       digest=$(shasum -a 256 -- "$ALIGNMENT_ARCHIVE" | awk '{print $1}')
     fi
     [ "$digest" = "$ALIGNMENT_METADATA_DIGEST" ] || return 1
+    [ -n "$ALIGNMENT_TOPIC" ] && [ "$ALIGNMENT_METADATA_TOPIC" = "$ALIGNMENT_TOPIC" ] || return 1
+    grep -Fqx "Path: $ALIGNMENT_PROJECT_PATH" "$ALIGNMENT_ARCHIVE" || return 1
+    grep -Fqx "Topic: $ALIGNMENT_TOPIC" "$ALIGNMENT_ARCHIVE" || return 1
     "$FM_ROOT/bin/fm-alignment.sh" validate-report "$ALIGNMENT_ARCHIVE" --complete \
       --session "$ID" --project "$ALIGNMENT_PROJECT_NAME" >/dev/null 2>&1
   }
@@ -789,6 +794,7 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
       [ "$ALIGNMENT_METADATA_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME" ]
       [ "$ALIGNMENT_METADATA_PROJECT_PATH" = "$ALIGNMENT_PROJECT_PATH" ]
       [ "$ALIGNMENT_METADATA_PROJECT_KEY" = "$ALIGNMENT_PROJECT_KEY" ]
+      [ "$ALIGNMENT_METADATA_TOPIC" = "$ALIGNMENT_TOPIC" ]
       [ "$ALIGNMENT_METADATA_STATUS" = abandoned ]
       [ "$ALIGNMENT_METADATA_REPORT" = report.md ]
       [ -n "$ALIGNMENT_METADATA_DIGEST" ]
@@ -834,6 +840,7 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
       && [ "$ALIGNMENT_METADATA_PROJECT_NAME" = "$ALIGNMENT_PROJECT_NAME" ] \
       && [ "$ALIGNMENT_METADATA_PROJECT_PATH" = "$ALIGNMENT_PROJECT_PATH" ] \
       && [ "$ALIGNMENT_METADATA_PROJECT_KEY" = "$ALIGNMENT_PROJECT_KEY" ] \
+      && [ "$ALIGNMENT_METADATA_TOPIC" = "$ALIGNMENT_TOPIC" ] \
       && [ "$ALIGNMENT_METADATA_STATUS" = completed ] \
       && [ "$ALIGNMENT_METADATA_REPORT" = report.md ] || {
         echo "REFUSED: ephemeral alignment $ID has no valid parent-owned archive; retain the report before cleanup" >&2
