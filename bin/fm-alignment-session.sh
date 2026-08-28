@@ -1313,7 +1313,8 @@ close_session() {
       fail "alignment $id has a complete report that must be retained before abandonment"
     fi
   fi
-  project_unchanged || fail "project changed during alignment; inspect it before closing the session"
+  hydration_snapshot_valid \
+    || fail "project or parent alignment inventory changed since alignment hydration; reconcile before closing the session"
   if [ "$abandon" -eq 1 ] && [ "$SESSION_STATUS" != completed ]; then
     retain_abandoned_session
   fi

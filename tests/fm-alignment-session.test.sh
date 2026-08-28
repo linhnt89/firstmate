@@ -491,6 +491,31 @@ test_historical_report_changes_invalidate_hydration() {
   pass "historical report content changes invalidate alignment hydration"
 }
 
+test_close_requires_reconciled_archive_snapshot() {
+  local observer later out status
+  observer=$(make_ephemeral_home close-archive-observer)
+  run_session "$observer" start close-archive-observer "$PROJECT" 'close archive topic' --harness claude >/dev/null
+
+  later=$(make_ephemeral_home close-archive-later)
+  run_session "$later" start close-archive-later "$PROJECT" 'later archive topic' --harness claude >/dev/null
+  write_report "$later" close-archive-later 'later archive topic'
+  run_session "$later" retain close-archive-later >/dev/null
+
+  write_report "$observer" close-archive-observer 'close archive topic'
+  run_session "$observer" retain close-archive-observer >/dev/null
+  out=$(run_session "$observer" close close-archive-observer 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "close accepted a newly added retained archive"
+  assert_contains "$out" 'changed since alignment hydration' \
+    "close did not require reconciliation after the archive inventory changed"
+
+  run_session "$observer" reconcile close-archive-observer --strong-executor >/dev/null \
+    || fail "strong reconciliation did not refresh the close snapshot"
+  run_session "$observer" close close-archive-observer >/dev/null \
+    || fail "close rejected a session after archive reconciliation"
+  pass "close validates the reconciled project and archive snapshots"
+}
+
 test_archive_staging_recovers_atomically() {
   local home="$TMP_ROOT/session-staging"
   home=$(make_ephemeral_home session-staging)
@@ -623,6 +648,8 @@ test_teardown_requires_retention_and_abandon_is_explicit() {
   local h1 h3 h4 out status
   h1="$TMP_ROOT/session-one"
   h3=$(make_ephemeral_home session-three)
+  run_session "$h1" reconcile one --strong-executor >/dev/null \
+    || fail "retained session could not reconcile before closing"
   run_session "$h1" close one >/dev/null || fail "retained session could not be closed"
   assert_absent "$PARENT/state/one.meta" "closed session retained live runtime metadata"
   assert_present "$PARENT/data/alignments/project/one/report.md" \
@@ -689,6 +716,7 @@ test_failed_launch_marks_runtime_abandoned_before_rollback
 test_archive_selective_retrieval_supersession_and_promotion
 test_promotion_detects_content_changes_to_preexisting_dirty_knowledge
 test_historical_report_changes_invalidate_hydration
+test_close_requires_reconciled_archive_snapshot
 test_archive_staging_recovers_atomically
 test_archive_symlink_ancestors_are_rejected
 test_teardown_rejects_symlinked_data_root
