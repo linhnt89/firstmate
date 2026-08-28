@@ -434,7 +434,7 @@ canonical_document_paths() {
         [ -f "$file" ] && [ ! -L "$file" ] && printf '%s\n' "$file"
         ;;
     esac
-  done < <(git -C "$project" ls-files -z -- ':!*.report.md')
+  done < <(git -C "$root" ls-files -z -- ':!*.report.md')
 }
 
 canonical_agents_sources() {

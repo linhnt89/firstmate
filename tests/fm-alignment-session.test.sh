@@ -625,6 +625,24 @@ test_agents_discovery_stays_inside_resolved_project() {
   pass "AGENTS discovery includes the bounded repository chain only"
 }
 
+test_nested_project_inventory_uses_repository_paths() {
+  local nested home
+  nested="$PROJECT/packages/nested"
+  mkdir -p "$nested"
+  printf '# Nested project knowledge\n\nTracked knowledge below a nested project root.\n' > "$nested/topic.md"
+  git -C "$PROJECT" add packages/nested/topic.md
+  git -C "$PROJECT" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm 'add nested project knowledge'
+
+  home=$(make_ephemeral_home nested-project)
+  run_session "$home" start nested "$nested" 'nested topic' --harness claude >/dev/null \
+    || fail "nested project alignment session could not start"
+  assert_grep $'candidate\ttopic.md\t' "$home/data/alignment-context.md" \
+    "nested project inventory omitted tracked prose relative to the project root"
+  run_session "$home" close nested --abandon >/dev/null \
+    || fail "empty nested alignment session could not be abandoned"
+  pass "nested project inventory resolves tracked prose from the repository root"
+}
+
 test_owner_precedence_resolves_conflicts() {
   local home
   printf '# Context owner\n' > "$PROJECT/docs/context-owner.md"
@@ -809,6 +827,7 @@ test_teardown_rejects_symlinked_data_root
 test_teardown_rejects_symlinked_abandoned_archive_ancestors
 test_teardown_rejects_tampered_alignment_identity
 test_teardown_requires_retention_and_abandon_is_explicit
+test_nested_project_inventory_uses_repository_paths
 test_agents_discovery_stays_inside_resolved_project
 test_owner_precedence_resolves_conflicts
 echo '# all fm-alignment-session tests passed'
