@@ -1178,10 +1178,14 @@ reconcile_session() {
     || fail "could not refresh the parent alignment inventory"
   record_set "$SESSION_RECORD" project_head "$head"
   record_set "$SESSION_RECORD" project_status_digest "$status_digest"
+  [ -d "$SESSION_HOME/data" ] && [ ! -L "$SESSION_HOME/data" ] \
+    || fail "alignment $id has no live hydration home"
+  write_canonical_context "$SESSION_HOME/data/alignment-context.md" "$SESSION_PROJECT_PATH"
+  write_session_charter "$SESSION_HOME/data/charter.md" "$SESSION_HOME/data/alignment-context.md"
   record_set "$SESSION_RECORD" hydration_project_head "$head"
   record_set "$SESSION_RECORD" hydration_project_status_digest "$status_digest"
   record_set "$SESSION_RECORD" hydration_archive_inventory_digest "$inventory"
-  printf 'reconciled alignment session %s against current project and archive snapshots\\n' "$id"
+  printf 'reconciled alignment session %s against current project and archive snapshots\n' "$id"
 }
 
 promote_session() {
@@ -1269,12 +1273,12 @@ retain_abandoned_session() {
   cp -- "$report" "$archive_tmp/report.md"
   meta="$archive_tmp/metadata"
   {
-    printf 'schema=fm-alignment-archive.v1\\n'
-    printf 'project_name=%s\\nproject_path=%s\\nproject_key=%s\\n' \
+    printf 'schema=fm-alignment-archive.v1\n'
+    printf 'project_name=%s\nproject_path=%s\nproject_key=%s\n' \
       "$SESSION_PROJECT_NAME" "$SESSION_PROJECT_PATH" "$SESSION_PROJECT_KEY"
-    printf 'session_id=%s\\ntopic=%s\\nsource=local\\nstatus=abandoned\\nreport=report.md\\n' \
+    printf 'session_id=%s\ntopic=%s\nsource=local\nstatus=abandoned\nreport=report.md\n' \
       "$SESSION_ID" "$SESSION_TOPIC"
-    printf 'supersedes=\\noutcome=neither\\nimplementation_ready=0\\nreport_digest=%s\\nretained=%s\\n' \
+    printf 'supersedes=\noutcome=neither\nimplementation_ready=0\nreport_digest=%s\nretained=%s\n' \
       "$(file_content_digest "$archive_tmp/report.md")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$meta"
   mv -- "$archive_tmp" "$archive_dir"

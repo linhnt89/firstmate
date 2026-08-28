@@ -742,8 +742,8 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
   ALIGNMENT_PROJECT_NAME=$(grep '^project_name=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_PROJECT_PATH=$(grep '^project_path=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_PROJECT_KEY=$(grep '^project_key=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-  ALIGNMENT_DERIVED_PROJECT_KEY=$(alignment_project_key_for_path "$ALIGNMENT_PROJECT_PATH")
   ALIGNMENT_EXPECTED_ARCHIVE="$DATA/alignments/$ALIGNMENT_PROJECT_KEY/$ID/report.md"
+  ALIGNMENT_PROJECT_KEY_RESERVATION="$DATA/alignments/$ALIGNMENT_PROJECT_KEY/.project-path"
   ALIGNMENT_METADATA="${ALIGNMENT_EXPECTED_ARCHIVE%/report.md}/metadata"
   ALIGNMENT_METADATA_SESSION=$(grep '^session_id=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
   ALIGNMENT_METADATA_PROJECT_NAME=$(grep '^project_name=' "$ALIGNMENT_METADATA" 2>/dev/null | tail -1 | cut -d= -f2- || true)
@@ -776,7 +776,9 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
       && [ -n "$ALIGNMENT_PROJECT_NAME" ] \
       && [ -n "$ALIGNMENT_PROJECT_PATH" ] \
       && [ -n "$ALIGNMENT_PROJECT_KEY" ] \
-      && [ "$ALIGNMENT_PROJECT_KEY" = "$ALIGNMENT_DERIVED_PROJECT_KEY" ] \
+      && [ -f "$ALIGNMENT_PROJECT_KEY_RESERVATION" ] \
+      && [ ! -L "$ALIGNMENT_PROJECT_KEY_RESERVATION" ] \
+      && [ "$(cat "$ALIGNMENT_PROJECT_KEY_RESERVATION" 2>/dev/null || true)" = "$ALIGNMENT_PROJECT_PATH" ] \
       && [ "$ALIGNMENT_ARCHIVE" = "$ALIGNMENT_EXPECTED_ARCHIVE" ] \
       && [ ! -L "$DATA" ] \
       && [ ! -L "$DATA/alignments" ] \
@@ -800,7 +802,9 @@ if [ "$ALIGNMENT_SESSION" = 1 ]; then
     || [ "$(grep '^session_id=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != "$ID" ] \
     || [ -z "$ALIGNMENT_PROJECT_NAME" ] || [ -z "$ALIGNMENT_PROJECT_PATH" ] \
     || [ -z "$ALIGNMENT_PROJECT_KEY" ] || [ -z "$HOME_PATH" ] \
-    || [ "$ALIGNMENT_PROJECT_KEY" != "$ALIGNMENT_DERIVED_PROJECT_KEY" ] \
+    || [ ! -f "$ALIGNMENT_PROJECT_KEY_RESERVATION" ] \
+    || [ -L "$ALIGNMENT_PROJECT_KEY_RESERVATION" ] \
+    || [ "$(cat "$ALIGNMENT_PROJECT_KEY_RESERVATION" 2>/dev/null || true)" != "$ALIGNMENT_PROJECT_PATH" ] \
     || [ "$(grep '^home=' "$ALIGNMENT_RECORD" 2>/dev/null | tail -1 | cut -d= -f2- || true)" != "$HOME_PATH" ] \
     || { [ "$ALIGNMENT_STATUS" != starting ] && [ "$ALIGNMENT_STATUS" != running ]; }; then
     echo "REFUSED: ephemeral alignment $ID has no valid parent session record for abandonment" >&2
